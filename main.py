@@ -233,7 +233,7 @@ def _msg_class(msg: str) -> str:
 def message_log() -> None:
     g = get_state()
     msgs = g.messages[-60:] if g else []
-    with ui.scroll_area().classes("w-full bg-black").style("height:280px"):
+    with ui.scroll_area().classes("w-full bg-black msg-log-area").style("height:280px"):
         for msg in msgs:
             ui.label(msg).classes(f"{_msg_class(msg)} font-mono text-xs block whitespace-pre-wrap")
 
@@ -262,6 +262,7 @@ def handle_command(input_el: ui.input) -> None:
     status_panel.refresh()
     galaxy_map.refresh()
     message_log.refresh()
+    ui.run_javascript("const el = document.querySelector('.msg-log-area .scroll'); if (el) el.scrollTop = el.scrollHeight;")
 
     if g.game_over:
         show_game_over_dialog(g)
