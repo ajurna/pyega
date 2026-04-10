@@ -71,25 +71,26 @@ def sector_grid() -> None:
             ).classes("text-green-600 text-sm")
 
         # Column headers
-        with ui.row().classes("gap-0 mb-0.5 ml-7"):
+        with ui.element("div").classes("flex ml-7 mb-0.5"):
             for c in range(8):
                 ui.label(str(c + 1)).classes("text-gray-600 font-mono text-xs w-8 text-center")
 
-        for r in range(8):
-            with ui.row().classes("gap-0 items-center"):
-                ui.label(str(r + 1)).classes("text-gray-600 font-mono text-xs w-6 text-right mr-1")
-                for c in range(8):
-                    entry = display.get((r, c))
-                    if entry:
-                        sym, kind = entry
-                        cls = CELL_CLASSES.get(kind, CELL_CLASSES["empty"])
-                    else:
-                        sym, cls = "·", CELL_CLASSES["empty"]
+        with ui.element("div").classes("flex flex-col"):
+            for r in range(8):
+                with ui.element("div").classes("flex items-center"):
+                    ui.label(str(r + 1)).classes("text-gray-600 font-mono text-xs w-6 text-right mr-1")
+                    for c in range(8):
+                        entry = display.get((r, c))
+                        if entry:
+                            sym, kind = entry
+                            cls = CELL_CLASSES.get(kind, CELL_CLASSES["empty"])
+                        else:
+                            sym, cls = "·", CELL_CLASSES["empty"]
 
-                    ui.label(sym).classes(
-                        f"{cls} font-mono text-lg w-8 h-8 flex items-center "
-                        "justify-center border border-gray-900 hover:bg-gray-800 cursor-default"
-                    )
+                        ui.label(sym).classes(
+                            f"{cls} font-mono text-lg w-8 h-8 flex items-center "
+                            "justify-center border border-gray-900 hover:bg-gray-800 cursor-default"
+                        )
 
         # Legend
         with ui.row().classes("mt-2 gap-3 font-mono text-xs"):
