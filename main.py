@@ -47,9 +47,6 @@ MSG_CLASSES: dict[str, str] = {
     "normal":  "text-green-300",
 }
 
-# Global log element reference (populated when UI is built)
-_log: ui.log | None = None
-
 
 # ---------------------------------------------------------------------------
 # Refreshable display components
@@ -219,15 +216,24 @@ def push_messages(msgs: list[str]) -> None:
         _log.push(msg)
 
 
-def _classify_msg(msg: str) -> str:
+def _msg_class(msg: str) -> str:
     lower = msg.lower()
     if any(w in lower for w in ["destroyed!", "lost", "depleted", "damaged!", "damaged ("]):
         return MSG_CLASSES["error"]
     if any(w in lower for w in ["docked", "replenished", "repaired", "accomplished"]):
         return MSG_CLASSES["success"]
-    if any(w in lower for w in ["warning", "alert", "klingon fires", "fires"]):
+    if any(w in lower for w in ["warning", "alert", "klingon", "fires"]):
         return MSG_CLASSES["warning"]
     return MSG_CLASSES["normal"]
+
+
+@ui.refreshable
+def message_log() -> None:
+    g = get_state()
+    msgs = g.messages[-60:] if g else []
+    with ui.scroll_area().classes("w-full bg-black").style("height:280px"):
+        for msg in msgs:
+            ui.label(msg).classes(f"{_msg_class(msg)} font-mono text-xs block whitespace-pre-wrap")
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +242,6 @@ def _classify_msg(msg: str) -> str:
 
 
 def handle_command(input_el: ui.input) -> None:
-    global _log
     raw = input_el.value
     if not raw or not raw.strip():
         return
@@ -246,15 +251,15 @@ def handle_command(input_el: ui.input) -> None:
     if g is None:
         return
 
-    if _log:
-        _log.push(f"> {raw}")
+    # Echo the command into the game message list so it appears in the log
+    g.messages.append(f"> {raw}")
 
-    msgs = G.parse_and_execute(g, raw)
-    push_messages(msgs)
+    G.parse_and_execute(g, raw)
 
     sector_grid.refresh()
     status_panel.refresh()
     galaxy_map.refresh()
+    message_log.refresh()
 
     if g.game_over:
         show_game_over_dialog(g)
@@ -349,21 +354,15 @@ def show_new_game_dialog(on_start) -> None:
 
 @ui.page("/")
 def index() -> None:
-    global _log
-
     ui.dark_mode().enable()
     ui.query("body").classes("bg-black")
 
     def start_game(klingons: int, stardates: int) -> None:
         new_game(klingons=klingons, starbases=4, stardates=stardates)
-        # Push initial messages to log
-        g = get_state()
-        if g and _log:
-            for msg in g.messages:
-                _log.push(msg)
         sector_grid.refresh()
         status_panel.refresh()
         galaxy_map.refresh()
+        message_log.refresh()
 
     # ---- Header ----
     with ui.header().classes("bg-gray-950 border-b border-gray-800 items-center justify-between px-4 py-2"):
@@ -388,9 +387,7 @@ def index() -> None:
             # Message log
             with ui.card().classes("bg-black border border-gray-700 w-full p-0"):
                 ui.label("MESSAGE LOG").classes("text-green-400 font-mono text-xs font-bold px-3 pt-2")
-                _log = ui.log(max_lines=200).classes(
-                    "w-full bg-black text-green-300 font-mono text-xs border-0"
-                ).style("height: 280px;")
+                message_log()
 
             # Command input
             with ui.card().classes("bg-gray-950 border border-gray-700 w-full p-3"):
