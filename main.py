@@ -176,32 +176,33 @@ def galaxy_map() -> None:
         ui.label("K=Klingons B=Starbases S=Stars").classes("text-gray-600 text-xs mb-1")
 
         # Column headers
-        with ui.row().classes("gap-0 mb-0.5 ml-4"):
+        with ui.element("div").classes("flex ml-4 mb-0.5"):
             for c in range(8):
                 ui.label(str(c + 1)).classes("text-gray-700 text-xs text-center").style("width:32px")
 
-        for r in range(8):
-            with ui.row().classes("gap-0 items-center"):
-                ui.label(str(r + 1)).classes("text-gray-700 text-xs w-4 text-right mr-0.5")
-                for c in range(8):
-                    code, is_current, scanned = data[r][c]
-                    if is_current:
-                        cls = "text-green-400 border border-green-500"
-                    elif not scanned:
-                        cls = "text-gray-800 border border-gray-900"
-                    else:
-                        k = int(code[0]) if code != "???" else 0
-                        b = code[1] if code != "???" else "0"
-                        if k > 0:
-                            cls = "text-red-400 border border-gray-800"
-                        elif b != "0":
-                            cls = "text-cyan-400 border border-gray-800"
+        with ui.element("div").classes("flex flex-col"):
+            for r in range(8):
+                with ui.element("div").classes("flex items-center"):
+                    ui.label(str(r + 1)).classes("text-gray-700 text-xs w-4 text-right mr-0.5")
+                    for c in range(8):
+                        code, is_current, scanned = data[r][c]
+                        if is_current:
+                            cls = "text-green-400 border border-green-500"
+                        elif not scanned:
+                            cls = "text-gray-800 border border-gray-900"
                         else:
-                            cls = "text-gray-500 border border-gray-800"
+                            k = int(code[0]) if code != "???" else 0
+                            b = code[1] if code != "???" else "0"
+                            if k > 0:
+                                cls = "text-red-400 border border-gray-800"
+                            elif b != "0":
+                                cls = "text-cyan-400 border border-gray-800"
+                            else:
+                                cls = "text-gray-500 border border-gray-800"
 
-                    ui.label(code).classes(
-                        f"{cls} text-center font-mono p-0.5"
-                    ).style("width:32px; font-size:9px;")
+                        ui.label(code).classes(
+                            f"{cls} text-center font-mono p-0.5"
+                        ).style("width:32px; font-size:9px;")
 
 
 # ---------------------------------------------------------------------------
