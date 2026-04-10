@@ -332,6 +332,13 @@ class GameState:
             if self.energy <= 0:
                 return
 
+    def _energy_regen(self) -> None:
+        """Passive reactor power generation each turn."""
+        if self.docked:
+            return
+        regen = 25 if self.damage.is_damaged("warp_engines") else 50
+        self.energy = min(INITIAL_ENERGY, self.energy + regen)
+
     def _dock(self) -> None:
         self.docked = True
         self.energy = INITIAL_ENERGY
@@ -401,6 +408,7 @@ class GameState:
             msgs.append(f"WARNING: {k} Klingon vessel(s) detected! RED ALERT!")
 
         self.damage.repair_tick()
+        self._energy_regen()
         for m in msgs:
             self._msg(m)
         self._klingon_attack()
@@ -440,6 +448,7 @@ class GameState:
                 msgs.append("Docked with starbase. Energy, torpedoes, shields replenished. Systems repaired.")
                 break
 
+        self._energy_regen()
         for m in msgs:
             self._msg(m)
 
@@ -481,6 +490,7 @@ class GameState:
         for k in killed:
             self.current_quadrant.klingons.remove(k)
 
+        self._energy_regen()
         for m in msgs:
             self._msg(m)
         self._klingon_attack()
@@ -526,6 +536,7 @@ class GameState:
         if not hit:
             msgs.append("Torpedo missed! No impact detected.")
 
+        self._energy_regen()
         for m in msgs:
             self._msg(m)
         self._klingon_attack()
