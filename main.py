@@ -277,7 +277,7 @@ def show_help_dialog() -> None:
     with ui.dialog() as dlg, ui.card().classes("bg-gray-900 font-mono max-w-xl"):
         ui.label("COMMAND REFERENCE").classes("text-green-400 font-bold mb-3")
         rows = [
-            ("warp QR QC", "Warp to quadrant row/col (1–8)"),
+            ("warp QR QC [SR SC]", "Warp to quadrant, optionally specify landing sector (1–8)"),
             ("mov  SR SC", "Impulse move to sector row/col (1–8)"),
             ("pha  POWER", "Fire phasers with POWER energy units"),
             ("tor  TR TC", "Fire torpedo at sector row/col (1–8)"),

@@ -374,35 +374,98 @@ class GameState:
     # Commands
     # ------------------------------------------------------------------
 
-    def cmd_warp(self, qr: int, qc: int) -> list[str]:
-        """Warp to quadrant (qr, qc) — 0-indexed."""
+    def _warp_path(self, dest_qr: int, dest_qc: int) -> list[tuple[int, int]]:
+        """Return quadrant coords along the straight-line path to destination, excluding origin."""
+        start_r, start_c = self.q_pos.row, self.q_pos.col
+        dr = dest_qr - start_r
+        dc = dest_qc - start_c
+        steps = max(abs(dr), abs(dc))
+        path: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for i in range(1, steps + 1):
+            r = round(start_r + dr * i / steps)
+            c = round(start_c + dc * i / steps)
+            if (r, c) not in seen:
+                path.append((r, c))
+                seen.add((r, c))
+        return path
+
+    def cmd_warp(self, qr: int, qc: int, sr: int | None = None, sc: int | None = None) -> list[str]:
+        """Warp to quadrant (qr, qc), landing in sector (sr, sc) — all 0-indexed.
+        If sr/sc are omitted the ship picks the first free sector."""
         if self.damage.is_damaged("warp_engines"):
             return ["Warp engines are damaged! Reach a starbase for repairs."]
         if not (0 <= qr <= 7 and 0 <= qc <= 7):
             return ["Invalid quadrant (coordinates must be 1–8)."]
+        if sr is not None and not (0 <= sr <= 7):
+            return ["Invalid sector row (must be 1–8)."]
+        if sc is not None and not (0 <= sc <= 7):
+            return ["Invalid sector col (must be 1–8)."]
         if qr == self.q_pos.row and qc == self.q_pos.col:
             return ["Already in that quadrant. Use 'mov' to move within a sector."]
 
-        dist = max(1, abs(qr - self.q_pos.row) + abs(qc - self.q_pos.col))
-        cost = dist * WARP_ENERGY_PER_QUADRANT
+        path = self._warp_path(qr, qc)
+        total_dist = len(path)
+        total_cost = total_dist * WARP_ENERGY_PER_QUADRANT
         available = self.energy - self.shields
 
-        if available < cost:
-            return [f"Insufficient energy. Need {cost}, have {available} (shields: {self.shields})."]
+        if available < total_cost:
+            return [f"Insufficient energy. Need {total_cost}, have {available} (shields: {self.shields})."]
 
-        self.energy -= cost
         self.docked = False
+        msgs: list[str] = []
+
+        # Check each intermediate quadrant for Klingon interdiction
+        for i, (quad_r, quad_c) in enumerate(path[:-1]):
+            q = self.galaxy.quadrants[quad_r][quad_c]
+            if q.klingon_count > 0:
+                pull_chance = min(0.85, 0.3 * q.klingon_count)
+                if random.random() < pull_chance:
+                    dist_traveled = i + 1
+                    cost = dist_traveled * WARP_ENERGY_PER_QUADRANT
+                    self.energy = max(0, self.energy - cost)
+                    self.stardate -= dist_traveled * 0.5
+                    self.q_pos = Position(quad_r, quad_c)
+                    pos = self.current_quadrant.random_free_pos()
+                    self.s_pos = pos if pos else Position(3, 3)
+                    self.current_quadrant.scanned = True
+                    msgs.append(
+                        f"Klingons in quadrant ({quad_r + 1},{quad_c + 1}) pull you out of warp!"
+                    )
+                    msgs.append(
+                        f"Dropped into ({quad_r + 1},{quad_c + 1}), "
+                        f"sector ({self.s_pos.row + 1},{self.s_pos.col + 1}). "
+                        f"Energy: {self.energy}  Stardate: {self.stardate:.1f}"
+                    )
+                    msgs.append(f"WARNING: {q.klingon_count} Klingon vessel(s) here! RED ALERT!")
+                    self.damage.repair_tick()
+                    self._energy_regen()
+                    for m in msgs:
+                        self._msg(m)
+                    self._klingon_attack()
+                    self._check_end()
+                    return msgs
+
+        # Reached destination
+        self.energy -= total_cost
+        self.stardate -= total_dist * 0.5
         self.q_pos = Position(qr, qc)
-
-        pos = self.current_quadrant.random_free_pos()
-        self.s_pos = pos if pos else Position(3, 3)
         self.current_quadrant.scanned = True
-        self.stardate -= dist * 0.5
 
-        msgs = [
-            f"Warped to quadrant ({qr + 1},{qc + 1}), sector ({self.s_pos.row + 1},{self.s_pos.col + 1}).",
-            f"Energy: {self.energy}  Stardate: {self.stardate:.1f}",
-        ]
+        # Land in requested sector if free, otherwise find a free one
+        if sr is not None and sc is not None:
+            occupied = self.current_quadrant.occupied_positions()
+            self.s_pos = Position(sr, sc) if (sr, sc) not in occupied else (
+                self.current_quadrant.random_free_pos() or Position(sr, sc)
+            )
+        else:
+            self.s_pos = self.current_quadrant.random_free_pos() or Position(3, 3)
+
+        msgs.append(
+            f"Arrived at quadrant ({qr + 1},{qc + 1}), "
+            f"sector ({self.s_pos.row + 1},{self.s_pos.col + 1})."
+        )
+        msgs.append(f"Energy: {self.energy}  Stardate: {self.stardate:.1f}")
         k = self.current_quadrant.klingon_count
         if k:
             msgs.append(f"WARNING: {k} Klingon vessel(s) detected! RED ALERT!")
@@ -623,7 +686,7 @@ class GameState:
     def cmd_help(self) -> list[str]:
         msgs = [
             "COMMAND REFERENCE:",
-            "  warp QR QC   Warp to quadrant row/col (1–8)",
+            "  warp QR QC [SR SC]   Warp to quadrant row/col, optionally landing in sector row/col (1–8)",
             "  mov  SR SC   Impulse move to sector row/col (1–8)",
             "  pha  POWER   Fire phasers with POWER energy units",
             "  tor  TR TC   Fire torpedo at sector row/col (1–8)",
@@ -688,8 +751,9 @@ def parse_and_execute(state: GameState, raw: str) -> list[str]:
     if verb == "warp":
         qr, qc = get_coord(0), get_coord(1)
         if qr is None or qc is None:
-            return ["Usage: warp <quadrant-row> <quadrant-col>  (e.g. warp 3 4)"]
-        return state.cmd_warp(qr, qc)
+            return ["Usage: warp <quadrant-row> <quadrant-col> [sector-row sector-col]  (e.g. warp 3 4 5 5)"]
+        sr, sc = get_coord(2), get_coord(3)
+        return state.cmd_warp(qr, qc, sr, sc)
 
     if verb == "mov":
         sr, sc = get_coord(0), get_coord(1)
