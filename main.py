@@ -143,6 +143,7 @@ def status_panel() -> None:
             ui.element("div").classes("bg-blue-500 h-2 rounded").style(f"width:{shield_pct * 100:.0f}%")
 
         row("Torpedoes", str(g.torpedoes), "text-orange-300")
+        row("Warp Factor", f"{g.warp_factor:.1f}", "text-purple-300")
 
         ui.separator().classes("my-1 border-gray-700")
 
@@ -277,8 +278,9 @@ def show_help_dialog() -> None:
     with ui.dialog() as dlg, ui.card().classes("bg-gray-900 font-mono max-w-xl"):
         ui.label("COMMAND REFERENCE").classes("text-green-400 font-bold mb-3")
         rows = [
-            ("warp QR QC [SR SC] [WF]", "Warp to quadrant; optional sector (1–8); optional warp factor 0.1–8 (default 5)"),
-            ("mov  SR SC", "Impulse move to sector row/col (1–8)"),
+            ("m QR QC SR SC", "Warp to quadrant+sector (e.g. m 6 2 3 5 or m6235)"),
+            ("m SR SC",       "Impulse within quadrant (e.g. m 3 5 or m35)"),
+            ("w FACTOR",      "Set warp factor 0.1–8 (e.g. w5 or w2.5, default 5)"),
             ("pha  POWER", "Fire phasers with POWER energy units"),
             ("tor  TR TC", "Fire torpedo at sector row/col (1–8)"),
             ("she  LEVEL", "Set shield energy level"),
@@ -397,7 +399,7 @@ def index() -> None:
                 ui.label("COMMAND").classes("text-green-400 font-mono text-xs font-bold mb-2")
                 with ui.row().classes("w-full gap-2 items-center"):
                     cmd_input = (
-                        ui.input(placeholder="e.g.  warp 3 4  |  pha 500  |  tor 2 6  |  lrs")
+                        ui.input(placeholder="e.g.  m 6 2 3 5  |  m 3 5  |  w 6  |  pha 500  |  tor 3 5  |  lrs")
                         .classes("flex-grow font-mono text-green-300 bg-black")
                         .props("dark dense standout outlined")
                     )

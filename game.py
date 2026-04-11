@@ -26,7 +26,8 @@ KLINGON_ATTACK_MIN = 50
 KLINGON_ATTACK_MAX = 200
 
 IMPULSE_ENERGY_COST = 20
-WARP_ENERGY_PER_QUADRANT = 100  # energy per quadrant of distance
+WARP_ENERGY_PER_QUADRANT = 100  # base energy per quadrant at warp 1
+ENERGY_REGEN_PER_STARDATE = 400  # energy produced per stardate elapsed
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +251,7 @@ class GameState:
         self.energy = INITIAL_ENERGY
         self.torpedoes = INITIAL_TORPEDOES
         self.shields = 0
+        self.warp_factor: float = DEFAULT_WARP
         self.damage = SystemDamage()
         self.docked = False
 
@@ -335,11 +337,15 @@ class GameState:
             if self.energy <= 0:
                 return
 
-    def _energy_regen(self) -> None:
-        """Passive reactor power generation each turn."""
+    def _energy_regen(self, stardates_elapsed: float) -> None:
+        """Passive reactor power generation proportional to time elapsed.
+        Generates ENERGY_REGEN_PER_STARDATE units per stardate at full power;
+        half that when warp engines are damaged.
+        """
         if self.docked:
             return
-        regen = 25 if self.damage.is_damaged("warp_engines") else 50
+        efficiency = 0.5 if self.damage.is_damaged("warp_engines") else 1.0
+        regen = int(ENERGY_REGEN_PER_STARDATE * stardates_elapsed * efficiency)
         self.energy = min(INITIAL_ENERGY, self.energy + regen)
 
     def _dock(self) -> None:
@@ -393,19 +399,79 @@ class GameState:
                 seen.add((r, c))
         return path
 
-    def cmd_warp(
+    def cmd_set_warp(self, warp_factor: float) -> list[str]:
+        """Set the ship's warp factor for future warp travel."""
+        max_warp = MAX_WARP / 2 if self.damage.is_damaged("warp_engines") else MAX_WARP
+        warp_factor = max(0.1, min(float(warp_factor), max_warp))
+        self.warp_factor = warp_factor
+        msg = f"Warp factor set to {warp_factor:.1f}."
+        if self.damage.is_damaged("warp_engines"):
+            msg += f" (Max {max_warp:.0f} — engines damaged.)"
+        self._msg(msg)
+        return [msg]
+
+    def cmd_move(
         self,
-        qr: int,
-        qc: int,
-        sr: int | None = None,
-        sc: int | None = None,
-        warp_factor: float = DEFAULT_WARP,
+        qr: int | None,
+        qc: int | None,
+        sr: int | None,
+        sc: int | None,
     ) -> list[str]:
-        """Warp to quadrant (qr, qc), landing in sector (sr, sc) — all 0-indexed.
-        warp_factor controls the energy/time trade-off:
-          energy/quadrant = warp_factor * WARP_ENERGY_PER_QUADRANT
-          stardates/quadrant = 1.0 / warp_factor
+        """Unified move command — mirrors the original EGATrek 'm' command.
+
+        Impulse (within current quadrant): provide only sr, sc.
+        Warp (to another quadrant):        provide qr, qc (and optionally sr, sc).
+
+        Warp uses self.warp_factor set by cmd_set_warp().
+        Energy at warp = warp_factor × WARP_ENERGY_PER_QUADRANT per quadrant.
+        Shields raised during warp doubles energy cost.
+        Time elapsed = 1.0 / warp_factor stardates per quadrant.
         """
+        # ---- Impulse move (sector only) ----
+        if qr is None or qc is None:
+            if sr is None or sc is None:
+                return ["Usage: m [QR QC] SR SC  (e.g. m35 or m6235)"]
+            if self.damage.is_damaged("impulse_engines"):
+                return ["Impulse engines are damaged!"]
+            if not (0 <= sr <= 7 and 0 <= sc <= 7):
+                return ["Invalid sector (coordinates must be 1–8)."]
+
+            available = self.energy - self.shields
+            if available < IMPULSE_ENERGY_COST:
+                return [f"Insufficient energy for impulse ({IMPULSE_ENERGY_COST} needed)."]
+
+            display = self.current_quadrant.get_display()
+            target = display.get((sr, sc))
+            if target:
+                sym, _ = target
+                if sym == "*":
+                    return ["Cannot navigate into a star!"]
+                if sym == "K":
+                    return ["Sector occupied by Klingon vessel!"]
+
+            self.energy -= IMPULSE_ENERGY_COST
+            self.s_pos = Position(sr, sc)
+            stardate_cost = 0.1
+            self.stardate -= stardate_cost
+            self.docked = False
+
+            msgs = [f"Impulse to sector ({sr + 1},{sc + 1}). Energy: {self.energy}"]
+
+            for base in self.current_quadrant.starbases:
+                if self.s_pos.is_adjacent_to(base):
+                    self._dock()
+                    msgs.append("Docked with starbase. Energy, torpedoes, shields replenished. Systems repaired.")
+                    break
+
+            self._energy_regen(stardate_cost)
+            for m in msgs:
+                self._msg(m)
+            if not self.docked:
+                self._klingon_attack()
+            self._check_end()
+            return msgs
+
+        # ---- Warp move (to another quadrant) ----
         if self.damage.is_damaged("warp_engines"):
             return ["Warp engines are damaged! Reach a starbase for repairs."]
         if not (0 <= qr <= 7 and 0 <= qc <= 7):
@@ -415,21 +481,22 @@ class GameState:
         if sc is not None and not (0 <= sc <= 7):
             return ["Invalid sector col (must be 1–8)."]
         if qr == self.q_pos.row and qc == self.q_pos.col:
-            return ["Already in that quadrant. Use 'mov' to move within a sector."]
+            return ["Already in that quadrant. Use 'm SR SC' to move within a sector."]
 
-        max_warp = MAX_WARP // 2 if self.damage.is_damaged("warp_engines") else MAX_WARP
-        warp_factor = max(0.1, min(float(warp_factor), max_warp))
+        wf = self.warp_factor
+        shield_multiplier = 2.0 if self.shields > 0 else 1.0
+        energy_per_quad = wf * WARP_ENERGY_PER_QUADRANT * shield_multiplier
+        time_per_quad = 1.0 / wf
 
         path = self._warp_path(qr, qc)
         total_dist = len(path)
-        energy_per_quad = warp_factor * WARP_ENERGY_PER_QUADRANT
-        time_per_quad = 1.0 / warp_factor
         total_cost = int(total_dist * energy_per_quad)
         available = self.energy - self.shields
 
         if available < total_cost:
+            shield_note = " (shields doubled cost)" if shield_multiplier > 1 else ""
             return [
-                f"Insufficient energy at warp {warp_factor:.1f}. "
+                f"Insufficient energy at warp {wf:.1f}{shield_note}. "
                 f"Need {total_cost}, have {available}."
             ]
 
@@ -444,8 +511,9 @@ class GameState:
                 if random.random() < pull_chance:
                     dist_traveled = i + 1
                     cost = int(dist_traveled * energy_per_quad)
+                    stardate_cost = dist_traveled * time_per_quad
                     self.energy = max(0, self.energy - cost)
-                    self.stardate -= dist_traveled * time_per_quad
+                    self.stardate -= stardate_cost
                     self.q_pos = Position(quad_r, quad_c)
                     pos = self.current_quadrant.random_free_pos()
                     self.s_pos = pos if pos else Position(3, 3)
@@ -460,7 +528,7 @@ class GameState:
                     )
                     msgs.append(f"WARNING: {q.klingon_count} Klingon vessel(s) here! RED ALERT!")
                     self.damage.repair_tick()
-                    self._energy_regen()
+                    self._energy_regen(stardate_cost)
                     for m in msgs:
                         self._msg(m)
                     self._klingon_attack()
@@ -468,8 +536,9 @@ class GameState:
                     return msgs
 
         # Reached destination
+        stardate_cost = total_dist * time_per_quad
         self.energy -= total_cost
-        self.stardate -= total_dist * time_per_quad
+        self.stardate -= stardate_cost
         self.q_pos = Position(qr, qc)
         self.current_quadrant.scanned = True
 
@@ -482,9 +551,11 @@ class GameState:
         else:
             self.s_pos = self.current_quadrant.random_free_pos() or Position(3, 3)
 
+        shield_note = " (shields active — double energy cost)" if shield_multiplier > 1 else ""
         msgs.append(
             f"Arrived at quadrant ({qr + 1},{qc + 1}), "
             f"sector ({self.s_pos.row + 1},{self.s_pos.col + 1})."
+            f"{shield_note}"
         )
         msgs.append(f"Energy: {self.energy}  Stardate: {self.stardate:.1f}")
         k = self.current_quadrant.klingon_count
@@ -492,49 +563,12 @@ class GameState:
             msgs.append(f"WARNING: {k} Klingon vessel(s) detected! RED ALERT!")
 
         self.damage.repair_tick()
-        self._energy_regen()
+        self._energy_regen(stardate_cost)
         for m in msgs:
             self._msg(m)
         self._klingon_attack()
         self._check_end()
         return msgs
-
-    def cmd_impulse(self, sr: int, sc: int) -> list[str]:
-        """Impulse move to sector (sr, sc) — 0-indexed."""
-        if self.damage.is_damaged("impulse_engines"):
-            return ["Impulse engines are damaged!"]
-        if not (0 <= sr <= 7 and 0 <= sc <= 7):
-            return ["Invalid sector (coordinates must be 1–8)."]
-
-        available = self.energy - self.shields
-        if available < IMPULSE_ENERGY_COST:
-            return [f"Insufficient energy for impulse ({IMPULSE_ENERGY_COST} needed)."]
-
-        display = self.current_quadrant.get_display()
-        target = display.get((sr, sc))
-        if target:
-            sym, _ = target
-            if sym == "*":
-                return ["Cannot navigate into a star!"]
-            if sym == "K":
-                return ["Sector occupied by Klingon vessel!"]
-
-        self.energy -= IMPULSE_ENERGY_COST
-        self.s_pos = Position(sr, sc)
-        self.stardate -= 0.1
-        self.docked = False
-
-        msgs = [f"Moved to sector ({sr + 1},{sc + 1})."]
-
-        for base in self.current_quadrant.starbases:
-            if self.s_pos.is_adjacent_to(base):
-                self._dock()
-                msgs.append("Docked with starbase. Energy, torpedoes, shields replenished. Systems repaired.")
-                break
-
-        self._energy_regen()
-        for m in msgs:
-            self._msg(m)
 
         if not self.docked:
             self._klingon_attack()
@@ -574,7 +608,7 @@ class GameState:
         for k in killed:
             self.current_quadrant.klingons.remove(k)
 
-        self._energy_regen()
+        self._energy_regen(0.1)
         for m in msgs:
             self._msg(m)
         self._klingon_attack()
@@ -620,7 +654,7 @@ class GameState:
         if not hit:
             msgs.append("Torpedo missed! No impact detected.")
 
-        self._energy_regen()
+        self._energy_regen(0.1)
         for m in msgs:
             self._msg(m)
         self._klingon_attack()
@@ -707,8 +741,9 @@ class GameState:
     def cmd_help(self) -> list[str]:
         msgs = [
             "COMMAND REFERENCE:",
-            "  warp QR QC [SR SC] [WF]   Warp to quadrant, optional sector (1–8), optional warp factor (0.1–8, default 5)",
-            "  mov  SR SC   Impulse move to sector row/col (1–8)",
+            "  m QR QC SR SC  Warp to quadrant+sector (e.g. m 6 2 3 5 or m6235)",
+            "  m SR SC        Impulse move within quadrant (e.g. m 3 5 or m35)",
+            "  w FACTOR       Set warp factor 0.1–8 (e.g. w5 or w2.5)",
             "  pha  POWER   Fire phasers with POWER energy units",
             "  tor  TR TC   Fire torpedo at sector row/col (1–8)",
             "  she  LEVEL   Set shield energy level (0 = drain)",
@@ -730,8 +765,7 @@ class GameState:
 # ---------------------------------------------------------------------------
 
 _ALIASES: dict[str, str] = {
-    "w": "warp", "nav": "warp",
-    "m": "mov", "imp": "mov", "impulse": "mov",
+    "move": "m", "nav": "m", "warp": "m", "imp": "m", "impulse": "m",
     "p": "pha", "phaser": "pha", "phasers": "pha",
     "t": "tor", "torp": "tor", "torpedo": "tor",
     "s": "she", "shield": "she", "shields": "she",
@@ -769,22 +803,36 @@ def parse_and_execute(state: GameState, raw: str) -> list[str]:
     if state.game_over:
         return ["Game is over. Start a new game."]
 
-    if verb == "warp":
-        qr, qc = get_coord(0), get_coord(1)
-        if qr is None or qc is None:
-            return ["Usage: warp <quadrant-row> <quadrant-col> [sector-row sector-col] [warp-factor]  (e.g. warp 3 4 5 5 6)"]
-        sr, sc = get_coord(2), get_coord(3)
+    if verb == "w":
         try:
-            wf = float(args[4]) if len(args) > 4 else DEFAULT_WARP
-        except ValueError:
-            wf = DEFAULT_WARP
-        return state.cmd_warp(qr, qc, sr, sc, wf)
+            wf = float(args[0])
+        except (IndexError, ValueError):
+            return [f"Usage: w <warp-factor>  (e.g. w5 or w2.5, max {MAX_WARP})"]
+        return state.cmd_set_warp(wf)
 
-    if verb == "mov":
-        sr, sc = get_coord(0), get_coord(1)
-        if sr is None or sc is None:
-            return ["Usage: mov <sector-row> <sector-col>  (e.g. mov 5 3)"]
-        return state.cmd_impulse(sr, sc)
+    if verb == "m":
+        # Parse compact form: m6235 → qr=6,qc=2,sr=3,sc=5 OR m35 → sr=3,sc=5
+        # Also accept space-separated: m 6 2 3 5 or m 3 5
+        if len(args) == 0:
+            return ["Usage: m [QR QC] SR SC  (e.g.  m 3 5  or  m 6 2 3 5)"]
+        if len(args) == 1:
+            # Compact form: all digits concatenated
+            digits = args[0]
+            if not digits.isdigit() or len(digits) not in (2, 4):
+                return ["Usage: m QRQCSRSC or m SRSC  (e.g. m6235 or m35)"]
+            if len(digits) == 4:
+                qr, qc, sr, sc = int(digits[0])-1, int(digits[1])-1, int(digits[2])-1, int(digits[3])-1
+            else:
+                qr, qc, sr, sc = None, None, int(digits[0])-1, int(digits[1])-1
+        elif len(args) == 2:
+            qr, qc = None, None
+            sr, sc = get_coord(0), get_coord(1)
+        elif len(args) == 4:
+            qr, qc = get_coord(0), get_coord(1)
+            sr, sc = get_coord(2), get_coord(3)
+        else:
+            return ["Usage: m [QR QC] SR SC  (e.g.  m 3 5  or  m 6 2 3 5)"]
+        return state.cmd_move(qr, qc, sr, sc)
 
     if verb == "pha":
         power = get_int(0)
