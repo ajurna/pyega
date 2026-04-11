@@ -90,10 +90,12 @@ def _panel(width: str, border_right: bool = True) -> ui.element:
 def sector_grid() -> None:
     g = get_state()
 
+    # Base font scales with viewport — all child sizes use em
     with ui.element("div").style(
-        "background:black; padding:6px 8px; width:100%; height:100%; "
+        "background:black; padding:0.4em 0.6em; width:100%; height:100%; "
         "overflow:hidden; box-sizing:border-box; font-family:monospace; "
-        "display:flex; flex-direction:column;"
+        "display:flex; flex-direction:column; "
+        "font-size:clamp(8px, 1.5vmin, 20px);"
     ):
         if g is None:
             return
@@ -102,22 +104,22 @@ def sector_grid() -> None:
 
         # Quadrant / sector coords
         with ui.element("div").style(
-            "display:flex; justify-content:space-between; margin-bottom:4px; flex-shrink:0;"
+            "display:flex; justify-content:space-between; margin-bottom:0.3em; flex-shrink:0;"
         ):
             ui.label(f"QUAD ({g.q_pos.row + 1},{g.q_pos.col + 1})").style(
-                "color:#86efac; font-size:11px; font-weight:bold;"
+                "color:#86efac; font-size:0.85em; font-weight:bold;"
             )
             ui.label(f"SEC ({g.s_pos.row + 1},{g.s_pos.col + 1})").style(
-                "color:#4ade80; font-size:10px;"
+                "color:#4ade80; font-size:0.75em;"
             )
 
         # Column headers
         with ui.element("div").style(
-            "display:flex; margin-left:20px; margin-bottom:1px; flex-shrink:0;"
+            "display:flex; margin-left:1.4em; margin-bottom:0.1em; flex-shrink:0;"
         ):
             for c in range(8):
                 ui.label(str(c + 1)).style(
-                    "flex:1; text-align:center; color:#374151; font-size:9px;"
+                    "flex:1; text-align:center; color:#374151; font-size:0.65em;"
                 )
 
         # Grid rows — fill remaining height
@@ -127,8 +129,8 @@ def sector_grid() -> None:
             for r in range(8):
                 with ui.element("div").style("display:flex; align-items:stretch; flex:1;"):
                     ui.label(str(r + 1)).style(
-                        "width:18px; text-align:right; padding-right:2px; "
-                        "color:#374151; font-size:9px; flex-shrink:0; "
+                        "width:1.4em; text-align:right; padding-right:0.2em; "
+                        "color:#374151; font-size:0.65em; flex-shrink:0; "
                         "display:flex; align-items:center; justify-content:flex-end;"
                     )
                     for c in range(8):
@@ -138,7 +140,7 @@ def sector_grid() -> None:
                             cls = CELL_CLASSES.get(entry[1], CELL_CLASSES["empty"])
                         ui.label(sym).classes(f"{cls} font-mono").style(
                             "flex:1; display:flex; align-items:center; "
-                            "justify-content:center; border:1px solid #0a0a0a; font-size:13px;"
+                            "justify-content:center; border:1px solid #0a0a0a; font-size:1em;"
                         )
 
 
@@ -225,10 +227,12 @@ def status_panel() -> None:
 def galaxy_map() -> None:
     g = get_state()
 
+    # Galaxy map has 3-char codes so base font is slightly smaller than sector grid
     with ui.element("div").style(
-        "background:black; padding:6px 10px; width:100%; height:100%; "
+        "background:black; padding:0.4em 0.6em; width:100%; height:100%; "
         "overflow:hidden; box-sizing:border-box; font-family:monospace; "
-        "display:flex; flex-direction:column;"
+        "display:flex; flex-direction:column; "
+        "font-size:clamp(8px, 1.3vmin, 18px);"
     ):
         if g is None:
             return
@@ -236,18 +240,18 @@ def galaxy_map() -> None:
         data = g.get_galaxy_display()
 
         with ui.element("div").style(
-            "display:flex; justify-content:space-between; margin-bottom:4px; flex-shrink:0;"
+            "display:flex; justify-content:space-between; margin-bottom:0.3em; flex-shrink:0;"
         ):
-            ui.label("GALAXY MAP").style("color:#4ade80; font-size:11px; font-weight:bold;")
-            ui.label("K=Klingons  B=Starbase  S=Stars").style("color:#374151; font-size:9px;")
+            ui.label("GALAXY MAP").style("color:#4ade80; font-size:0.85em; font-weight:bold;")
+            ui.label("K=Klingons  B=Starbase  S=Stars").style("color:#374151; font-size:0.65em;")
 
         # Column headers
         with ui.element("div").style(
-            "display:flex; margin-left:22px; margin-bottom:1px; flex-shrink:0;"
+            "display:flex; margin-left:1.6em; margin-bottom:0.1em; flex-shrink:0;"
         ):
             for c in range(8):
                 ui.label(str(c + 1)).style(
-                    "flex:1; text-align:center; color:#374151; font-size:9px;"
+                    "flex:1; text-align:center; color:#374151; font-size:0.65em;"
                 )
 
         # Grid rows — fill remaining height
@@ -257,8 +261,8 @@ def galaxy_map() -> None:
             for r in range(8):
                 with ui.element("div").style("display:flex; align-items:stretch; flex:1;"):
                     ui.label(str(r + 1)).style(
-                        "width:18px; text-align:right; padding-right:2px; "
-                        "color:#374151; font-size:9px; flex-shrink:0; "
+                        "width:1.6em; text-align:right; padding-right:0.2em; "
+                        "color:#374151; font-size:0.65em; flex-shrink:0; "
                         "display:flex; align-items:center; justify-content:flex-end;"
                     )
                     for c in range(8):
@@ -281,7 +285,7 @@ def galaxy_map() -> None:
                         ui.label(code).style(
                             f"flex:1; display:flex; align-items:center; "
                             f"justify-content:center; color:{fg_c}; background:{bg_c}; "
-                            f"border:{border}; font-size:10px; box-sizing:border-box;"
+                            f"border:{border}; font-size:0.9em; box-sizing:border-box;"
                         )
 
 
