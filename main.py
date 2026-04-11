@@ -232,7 +232,7 @@ def galaxy_map() -> None:
         "background:black; padding:0.4em 0.6em; width:100%; height:100%; "
         "overflow:hidden; box-sizing:border-box; font-family:monospace; "
         "display:flex; flex-direction:column; "
-        "font-size:clamp(9px, 1.7vmin, 28px);"
+        "font-size:clamp(9px, 2.0vmin, 32px);"
     ):
         if g is None:
             return
