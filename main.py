@@ -401,11 +401,34 @@ def show_new_game_dialog(on_start) -> None:
 def index() -> None:
     ui.dark_mode().enable()
 
-    # Full-viewport, no scroll
+    # Full-viewport, no scroll.
+    # NiceGUI wraps content in Quasar's q-layout > q-page-container > q-page
+    # before .nicegui-content, so all those layers need explicit heights too.
     ui.add_css(f"""
-        body {{ margin: 0; overflow: hidden; background: black; }}
-        .nicegui-content {{ padding: 0 !important; height: 100vh;
-                            display: flex; flex-direction: column; overflow: hidden; }}
+        html, body {{
+            margin: 0; padding: 0;
+            height: 100%; overflow: hidden; background: black;
+        }}
+        #app, .q-app {{
+            height: 100vh !important; overflow: hidden;
+        }}
+        .q-layout {{
+            height: 100vh !important; overflow: hidden;
+            min-height: unset !important;
+        }}
+        .q-page-container {{
+            height: 100vh !important; overflow: hidden;
+            padding: 0 !important;
+        }}
+        .q-page {{
+            height: 100vh !important; overflow: hidden;
+            min-height: unset !important;
+        }}
+        .nicegui-content {{
+            padding: 0 !important;
+            height: 100vh !important;
+            display: flex; flex-direction: column; overflow: hidden;
+        }}
     """)
 
     def start_game(klingons: int, stardates: int) -> None:
