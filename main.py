@@ -92,7 +92,8 @@ def sector_grid() -> None:
 
     with ui.element("div").style(
         "background:black; padding:6px 8px; width:100%; height:100%; "
-        "overflow:hidden; box-sizing:border-box; font-family:monospace;"
+        "overflow:hidden; box-sizing:border-box; font-family:monospace; "
+        "display:flex; flex-direction:column;"
     ):
         if g is None:
             return
@@ -100,7 +101,9 @@ def sector_grid() -> None:
         display = g.get_sector_display()
 
         # Quadrant / sector coords
-        with ui.element("div").style("display:flex; justify-content:space-between; margin-bottom:4px;"):
+        with ui.element("div").style(
+            "display:flex; justify-content:space-between; margin-bottom:4px; flex-shrink:0;"
+        ):
             ui.label(f"QUAD ({g.q_pos.row + 1},{g.q_pos.col + 1})").style(
                 "color:#86efac; font-size:11px; font-weight:bold;"
             )
@@ -109,19 +112,24 @@ def sector_grid() -> None:
             )
 
         # Column headers
-        with ui.element("div").style("display:flex; margin-left:20px; margin-bottom:1px;"):
+        with ui.element("div").style(
+            "display:flex; margin-left:20px; margin-bottom:1px; flex-shrink:0;"
+        ):
             for c in range(8):
                 ui.label(str(c + 1)).style(
-                    "width:27px; text-align:center; color:#374151; font-size:9px;"
+                    "flex:1; text-align:center; color:#374151; font-size:9px;"
                 )
 
-        # Grid rows
-        with ui.element("div").style("display:flex; flex-direction:column;"):
+        # Grid rows — fill remaining height
+        with ui.element("div").style(
+            "display:flex; flex-direction:column; flex:1; min-height:0;"
+        ):
             for r in range(8):
-                with ui.element("div").style("display:flex; align-items:center;"):
+                with ui.element("div").style("display:flex; align-items:stretch; flex:1;"):
                     ui.label(str(r + 1)).style(
-                        "width:18px; text-align:right; margin-right:2px; "
-                        "color:#374151; font-size:9px; flex-shrink:0;"
+                        "width:18px; text-align:right; padding-right:2px; "
+                        "color:#374151; font-size:9px; flex-shrink:0; "
+                        "display:flex; align-items:center; justify-content:flex-end;"
                     )
                     for c in range(8):
                         entry = display.get((r, c))
@@ -129,7 +137,7 @@ def sector_grid() -> None:
                         if entry:
                             cls = CELL_CLASSES.get(entry[1], CELL_CLASSES["empty"])
                         ui.label(sym).classes(f"{cls} font-mono").style(
-                            "width:27px; height:27px; display:flex; align-items:center; "
+                            "flex:1; display:flex; align-items:center; "
                             "justify-content:center; border:1px solid #0a0a0a; font-size:13px;"
                         )
 
@@ -219,30 +227,39 @@ def galaxy_map() -> None:
 
     with ui.element("div").style(
         "background:black; padding:6px 10px; width:100%; height:100%; "
-        "overflow:hidden; box-sizing:border-box; font-family:monospace;"
+        "overflow:hidden; box-sizing:border-box; font-family:monospace; "
+        "display:flex; flex-direction:column;"
     ):
         if g is None:
             return
 
         data = g.get_galaxy_display()
 
-        with ui.element("div").style("display:flex; justify-content:space-between; margin-bottom:4px;"):
+        with ui.element("div").style(
+            "display:flex; justify-content:space-between; margin-bottom:4px; flex-shrink:0;"
+        ):
             ui.label("GALAXY MAP").style("color:#4ade80; font-size:11px; font-weight:bold;")
             ui.label("K=Klingons  B=Starbase  S=Stars").style("color:#374151; font-size:9px;")
 
         # Column headers
-        with ui.element("div").style("display:flex; margin-left:20px; margin-bottom:1px;"):
+        with ui.element("div").style(
+            "display:flex; margin-left:22px; margin-bottom:1px; flex-shrink:0;"
+        ):
             for c in range(8):
                 ui.label(str(c + 1)).style(
-                    "width:40px; text-align:center; color:#374151; font-size:9px;"
+                    "flex:1; text-align:center; color:#374151; font-size:9px;"
                 )
 
-        with ui.element("div").style("display:flex; flex-direction:column;"):
+        # Grid rows — fill remaining height
+        with ui.element("div").style(
+            "display:flex; flex-direction:column; flex:1; min-height:0;"
+        ):
             for r in range(8):
-                with ui.element("div").style("display:flex; align-items:center;"):
+                with ui.element("div").style("display:flex; align-items:stretch; flex:1;"):
                     ui.label(str(r + 1)).style(
-                        "width:18px; text-align:right; margin-right:2px; "
-                        "color:#374151; font-size:9px; flex-shrink:0;"
+                        "width:18px; text-align:right; padding-right:2px; "
+                        "color:#374151; font-size:9px; flex-shrink:0; "
+                        "display:flex; align-items:center; justify-content:flex-end;"
                     )
                     for c in range(8):
                         code, is_current, scanned = data[r][c]
@@ -262,7 +279,7 @@ def galaxy_map() -> None:
                                 fg_c, border, bg_c = "#6b7280", "1px solid #1f2937", "transparent"
 
                         ui.label(code).style(
-                            f"width:40px; height:30px; display:flex; align-items:center; "
+                            f"flex:1; display:flex; align-items:center; "
                             f"justify-content:center; color:{fg_c}; background:{bg_c}; "
                             f"border:{border}; font-size:10px; box-sizing:border-box;"
                         )
