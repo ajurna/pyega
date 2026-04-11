@@ -402,33 +402,43 @@ def index() -> None:
     ui.dark_mode().enable()
 
     # Full-viewport, no scroll.
-    # NiceGUI wraps content in Quasar's q-layout > q-page-container > q-page
-    # before .nicegui-content, so all those layers need explicit heights too.
-    ui.add_css(f"""
-        html, body {{
+    # NiceGUI's own CSS sets align-items:flex-start and gap/padding on
+    # .nicegui-content, which collapses children to content-width.
+    # Quasar's q-layout stack also needs explicit heights.
+    ui.add_css("""
+        html, body {
             margin: 0; padding: 0;
-            height: 100%; overflow: hidden; background: black;
-        }}
-        #app, .q-app {{
-            height: 100vh !important; overflow: hidden;
-        }}
-        .q-layout {{
-            height: 100vh !important; overflow: hidden;
+            width: 100%; height: 100%;
+            overflow: hidden; background: black;
+        }
+        #app, .q-app {
+            width: 100% !important; height: 100vh !important;
+            overflow: hidden !important;
+        }
+        .q-layout {
+            width: 100% !important; height: 100vh !important;
+            min-height: unset !important; overflow: hidden !important;
+        }
+        .q-page-container {
+            width: 100% !important; height: 100vh !important;
             min-height: unset !important;
-        }}
-        .q-page-container {{
-            height: 100vh !important; overflow: hidden;
+            padding: 0 !important; overflow: hidden !important;
+        }
+        .q-page {
+            width: 100% !important; height: 100vh !important;
+            min-height: unset !important; overflow: hidden !important;
+        }
+        .nicegui-content {
+            /* override NiceGUI defaults: align-items, gap, padding */
+            align-items: stretch !important;
+            gap: 0 !important;
             padding: 0 !important;
-        }}
-        .q-page {{
-            height: 100vh !important; overflow: hidden;
-            min-height: unset !important;
-        }}
-        .nicegui-content {{
-            padding: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
             height: 100vh !important;
-            display: flex; flex-direction: column; overflow: hidden;
-        }}
+            flex-direction: column !important;
+            overflow: hidden !important;
+        }
     """)
 
     def start_game(klingons: int, stardates: int) -> None:
