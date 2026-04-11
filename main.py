@@ -163,32 +163,34 @@ def status_panel() -> None:
         fg   = CONDITION_FG.get(cond, "#4ade80")
         bg   = CONDITION_BG.get(cond, "#14532d")
 
-        # Alert badge
-        ui.element("div").style(
+        # Alert badge — ui.label renders actual text, ui.element().text does not
+        ui.label(f"◉  {cond}").style(
             f"background:{bg}; color:{fg}; text-align:center; font-weight:bold; "
             f"font-size:12px; padding:3px 6px; border-radius:3px; margin-bottom:6px; "
-            f"font-family:monospace;"
-        ).text = f"◉  {cond}"
+            f"font-family:monospace; width:100%; box-sizing:border-box;"
+        )
 
         def stat(label: str, value: str, color: str = "#86efac") -> None:
             with ui.element("div").style(
                 "display:flex; justify-content:space-between; margin-bottom:3px;"
             ):
-                ui.element("span").style("color:#6b7280; font-size:11px;").text = label
-                ui.element("span").style(f"color:{color}; font-size:11px; font-weight:bold;").text = value
+                ui.label(label).style("color:#6b7280; font-size:11px;")
+                ui.label(value).style(f"color:{color}; font-size:11px; font-weight:bold;")
+
+        def divider() -> None:
+            ui.element("div").style("height:1px; background:#1e293b; margin:4px 0; width:100%;")
 
         def bar(pct: float, color: str) -> None:
             with ui.element("div").style(
                 "height:5px; background:#1e293b; border-radius:2px; "
-                "overflow:hidden; margin-bottom:5px; margin-top:1px;"
+                "overflow:hidden; margin-bottom:5px; margin-top:1px; width:100%;"
             ):
                 ui.element("div").style(
                     f"height:100%; width:{pct * 100:.0f}%; background:{color};"
                 )
 
         stat("Stardate", f"{g.stardate:.1f}")
-
-        ui.element("div").style("height:1px; background:#1e293b; margin:4px 0;")
+        divider()
 
         # Energy
         epct = max(0.0, min(1.0, g.energy / G.INITIAL_ENERGY))
@@ -202,8 +204,7 @@ def status_panel() -> None:
         stat("Shields", str(g.shields), "#93c5fd")
         bar(spct, "#3b82f6")
 
-        ui.element("div").style("height:1px; background:#1e293b; margin:4px 0;")
-
+        divider()
         stat("Warp",      f"{g.warp_factor:.1f}", "#c084fc")
         stat("Klingons",  str(g.galaxy.total_klingons), "#f87171")
         stat("Torpedoes", str(g.torpedoes), "#fb923c")
@@ -211,12 +212,12 @@ def status_panel() -> None:
         # Damage (compact)
         damaged = [(name, lvl) for _, name, lvl in g.damage.all_systems() if lvl > 0]
         if damaged:
-            ui.element("div").style("height:1px; background:#1e293b; margin:4px 0;")
-            ui.element("div").style(
+            divider()
+            ui.label("DAMAGE").style(
                 "color:#f87171; font-size:10px; font-weight:bold; margin-bottom:2px;"
-            ).text = "DAMAGE"
+            )
             for name, lvl in damaged:
-                ui.element("div").style("color:#fca5a5; font-size:10px;").text = f"  {name}: {lvl}t"
+                ui.label(f"  {name}: {lvl}t").style("color:#fca5a5; font-size:10px;")
 
 
 # ---------------------------------------------------------------------------
