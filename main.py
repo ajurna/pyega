@@ -95,7 +95,7 @@ def sector_grid() -> None:
         "background:black; padding:0.4em 0.6em; width:100%; height:100%; "
         "overflow:hidden; box-sizing:border-box; font-family:monospace; "
         "display:flex; flex-direction:column; "
-        "font-size:clamp(8px, 1.5vmin, 20px);"
+        "font-size:clamp(10px, 3vmin, 48px);"
     ):
         if g is None:
             return
@@ -232,7 +232,7 @@ def galaxy_map() -> None:
         "background:black; padding:0.4em 0.6em; width:100%; height:100%; "
         "overflow:hidden; box-sizing:border-box; font-family:monospace; "
         "display:flex; flex-direction:column; "
-        "font-size:clamp(8px, 1.3vmin, 18px);"
+        "font-size:clamp(10px, 2.2vmin, 36px);"
     ):
         if g is None:
             return
