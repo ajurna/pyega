@@ -312,6 +312,20 @@ def message_log() -> None:
 # Command handling
 # ---------------------------------------------------------------------------
 
+_TOR_VERBS = {"tor", "t", "torp", "torpedo"}
+
+
+def _refresh_all() -> None:
+    sector_grid.refresh()
+    status_panel.refresh()
+    galaxy_map.refresh()
+    message_log.refresh()
+    ui.run_javascript(
+        "const el = document.querySelector('.msg-log-area .scroll');"
+        "if (el) el.scrollTop = el.scrollHeight;"
+    )
+
+
 def handle_command(input_el: ui.input) -> None:
     raw = input_el.value
     if not raw or not raw.strip():
@@ -322,17 +336,15 @@ def handle_command(input_el: ui.input) -> None:
     if g is None:
         return
 
+    # Intercept bare torpedo command → open targeting dialog
+    parts = raw.strip().lower().split()
+    if parts[0] in _TOR_VERBS and len(parts) == 1:
+        show_torpedo_dialog()
+        return
+
     g.messages.append(f"> {raw}")
     G.parse_and_execute(g, raw)
-
-    sector_grid.refresh()
-    status_panel.refresh()
-    galaxy_map.refresh()
-    message_log.refresh()
-    ui.run_javascript(
-        "const el = document.querySelector('.msg-log-area .scroll');"
-        "if (el) el.scrollTop = el.scrollHeight;"
-    )
+    _refresh_all()
 
     if g.game_over:
         show_game_over_dialog(g)
@@ -342,6 +354,155 @@ def handle_command(input_el: ui.input) -> None:
 # Dialogs
 # ---------------------------------------------------------------------------
 
+def show_torpedo_dialog() -> None:
+    g = get_state()
+    if g is None:
+        return
+
+    tubes = g.torpedo_tubes
+    max_fire = min(tubes, g.torpedoes)
+
+    if max_fire == 0:
+        g.messages.append("No torpedoes available!")
+        message_log.refresh()
+        return
+
+    # Mutable dialog state
+    sel: list[tuple[int, int]] = []
+    num = {"val": 1}
+
+    with ui.dialog() as dlg, ui.card().style(
+        "background:#0f172a; font-family:monospace; padding:16px; min-width:420px;"
+    ):
+        # Header
+        ui.label("-- TORPEDO CONTROL --").style(
+            "color:#f87171; font-size:15px; font-weight:bold; "
+            "text-align:center; width:100%; margin-bottom:4px;"
+        )
+        ui.label(
+            f"Torpedoes: {g.torpedoes}   Tubes: {tubes}"
+            + ("   (shields degrading accuracy)" if g.shields_up else "")
+        ).style("color:#6b7280; font-size:10px; margin-bottom:10px;")
+
+        # Count selector
+        count_label = ui.label("Fire: 1 torpedo").style(
+            "color:#fb923c; font-size:12px; font-weight:bold; margin-bottom:6px;"
+        )
+        count_btns: list[ui.button] = []
+        with ui.element("div").style("display:flex; gap:8px; margin-bottom:10px;"):
+            for n in range(1, max_fire + 1):
+                b = ui.button(str(n)).props("dense").style(
+                    "min-width:36px; font-family:monospace; font-weight:bold;"
+                )
+                count_btns.append(b)
+
+        # Sector map (refreshable so selection highlights update)
+        ui.label("Select target sector(s):").style(
+            "color:#9ca3af; font-size:10px; margin-bottom:4px;"
+        )
+
+        @ui.refreshable
+        def torp_sector_grid() -> None:
+            display = g.get_sector_display()
+            sel_set = set(sel)
+            with ui.element("div").style("display:flex; flex-direction:column; gap:2px;"):
+                for r in range(8):
+                    with ui.element("div").style("display:flex; gap:2px;"):
+                        for c in range(8):
+                            entry = display.get((r, c))
+                            is_ship = (r, c) == (g.s_pos.row, g.s_pos.col)
+                            is_sel = (r, c) in sel_set
+
+                            if entry:
+                                sym, etype = entry
+                            else:
+                                sym, etype = "·", "empty"
+
+                            if is_sel:
+                                bg, border, fg = "#7f1d1d", "2px solid #ef4444", "#fca5a5"
+                            elif etype == "ship":
+                                bg, border, fg = "#052e16", "1px solid #4ade80", "#4ade80"
+                            elif etype == "klingon":
+                                bg, border, fg = "#1c0a0a", "1px solid #dc2626", "#f87171"
+                            elif etype == "starbase":
+                                bg, border, fg = "#0a1c1c", "1px solid #22d3ee", "#22d3ee"
+                            elif etype == "star":
+                                bg, border, fg = "transparent", "1px solid #292524", "#facc15"
+                            else:
+                                bg, border, fg = "transparent", "1px solid #1f2937", "#374151"
+
+                            def on_cell_click(r: int = r, c: int = c) -> None:
+                                if is_ship:
+                                    return
+                                if (r, c) in sel:
+                                    sel.remove((r, c))
+                                elif len(sel) < num["val"]:
+                                    sel.append((r, c))
+                                torp_sector_grid.refresh()
+                                _update_sel_label()
+
+                            ui.button(sym).on("click", on_cell_click).style(
+                                f"width:36px; height:36px; min-width:36px; padding:0; "
+                                f"background:{bg}; color:{fg}; border:{border}; "
+                                f"font-family:monospace; font-size:13px; font-weight:bold;"
+                            ).props("dense flat")
+
+        torp_sector_grid()
+
+        sel_label = ui.label("Targets: none selected").style(
+            "color:#9ca3af; font-size:10px; margin-top:6px;"
+        )
+
+        def _update_sel_label() -> None:
+            if sel:
+                t = "  ".join(f"({r+1},{c+1})" for r, c in sel)
+                sel_label.text = f"Targets: {t}"
+            else:
+                sel_label.text = "Targets: none selected"
+
+        def set_count(n: int) -> None:
+            num["val"] = n
+            while len(sel) > n:
+                sel.pop()
+            count_label.text = f"Fire: {n} torpedo{'es' if n != 1 else ''}"
+            for i, b in enumerate(count_btns):
+                active = (i + 1 == n)
+                b.style(
+                    f"min-width:36px; font-family:monospace; font-weight:bold; "
+                    f"background:{'#dc2626' if active else '#374151'}; "
+                    f"color:{'white' if active else '#9ca3af'};"
+                )
+            torp_sector_grid.refresh()
+            _update_sel_label()
+
+        for i, b in enumerate(count_btns):
+            b.on("click", lambda n=i + 1: set_count(n))
+        set_count(1)
+
+        # Fire / Cancel
+        with ui.element("div").style("display:flex; gap:8px; margin-top:12px;"):
+            def fire() -> None:
+                if not sel:
+                    ui.notify("Select at least one target sector first.", color="warning")
+                    return
+                targets = list(sel)
+                dlg.close()
+                g.messages.append(f"> tor {' '.join(f'{r+1} {c+1}' for r, c in targets)}")
+                g.cmd_torpedo(targets)
+                _refresh_all()
+                if g.game_over:
+                    show_game_over_dialog(g)
+
+            ui.button("FIRE TORPEDOES", on_click=fire).style(
+                "background:#dc2626; color:white; font-family:monospace; font-weight:bold;"
+            ).props("dense")
+            ui.button("CANCEL", on_click=dlg.close).style(
+                "background:#374151; color:#9ca3af; font-family:monospace;"
+            ).props("dense")
+
+    dlg.open()
+
+
 def show_help_dialog() -> None:
     with ui.dialog() as dlg, ui.card().classes("bg-gray-900 font-mono max-w-xl"):
         ui.label("COMMAND REFERENCE").classes("text-green-400 font-bold mb-3")
@@ -350,7 +511,7 @@ def show_help_dialog() -> None:
             ("m SR SC",        "Impulse within quadrant (e.g. m 3 5 or m35)"),
             ("w FACTOR",       "Set warp factor 0.1–8 (e.g. w5 or w2.5, default 5)"),
             ("pha POWER",      "Fire phasers with POWER energy units"),
-            ("tor TR TC ...",   "Fire up to 3 torpedoes (e.g. tor 3 5  or  tor 3 5 4 6)"),
+            ("tor",             "Open torpedo targeting dialog (clickable sector map)"),
             ("shup / s",       "Raise shields (small energy cost)"),
             ("shdn / sd",      "Lower shields (free; pool energy retained)"),
             ("ene N",          "Transfer N energy to shields (neg = reclaim from shields)"),
@@ -526,6 +687,9 @@ def index() -> None:
         cmd_input.on("keydown.enter", lambda: handle_command(cmd_input))
         ui.button("SEND", on_click=lambda: handle_command(cmd_input)).classes(
             "bg-green-800 text-green-200 font-mono text-sm"
+        ).props("dense")
+        ui.button("TORPEDO", on_click=show_torpedo_dialog).classes(
+            "bg-red-900 text-red-300 font-mono text-sm"
         ).props("dense")
         ui.button("HELP", on_click=show_help_dialog).classes(
             "bg-gray-800 text-gray-300 font-mono text-sm"
