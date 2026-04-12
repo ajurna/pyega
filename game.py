@@ -250,7 +250,7 @@ class GameState:
         # Ship stats
         self.energy = INITIAL_ENERGY
         self.torpedoes = INITIAL_TORPEDOES
-        self.shield_energy: int = 0       # energy stored in the shield pool
+        self.shield_energy: int = MAX_SHIELDS  # energy stored in the shield pool
         self.shields_up: bool = False     # whether shields are currently raised
         self.warp_factor: float = DEFAULT_WARP
         self.damage = SystemDamage()
