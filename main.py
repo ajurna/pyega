@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from nicegui import ui
 import game as G
 
@@ -354,6 +356,24 @@ def handle_command(input_el: ui.input) -> None:
 # Dialogs
 # ---------------------------------------------------------------------------
 
+def _torp_path(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
+    """Bresenham-ish straight line from start to end (exclusive of start)."""
+    r0, c0 = start
+    r1, c1 = end
+    dr, dc = r1 - r0, c1 - c0
+    steps = max(abs(dr), abs(dc))
+    if steps == 0:
+        return [(r1, c1)]
+    path, seen = [], set()
+    for i in range(1, steps + 1):
+        r = round(r0 + dr * i / steps)
+        c = round(c0 + dc * i / steps)
+        if (r, c) not in seen:
+            path.append((r, c))
+            seen.add((r, c))
+    return path
+
+
 def show_torpedo_dialog() -> None:
     g = get_state()
     if g is None:
@@ -370,11 +390,11 @@ def show_torpedo_dialog() -> None:
     # Mutable dialog state
     sel: list[tuple[int, int]] = []
     num = {"val": 1}
+    anim = {"torps": set(), "impacts": set(), "firing": False}
 
     with ui.dialog() as dlg, ui.card().style(
         "background:#0f172a; font-family:monospace; padding:16px; min-width:420px;"
     ):
-        # Header
         ui.label("-- TORPEDO CONTROL --").style(
             "color:#f87171; font-size:15px; font-weight:bold; "
             "text-align:center; width:100%; margin-bottom:4px;"
@@ -396,7 +416,6 @@ def show_torpedo_dialog() -> None:
                 )
                 count_btns.append(b)
 
-        # Sector map (refreshable so selection highlights update)
         ui.label("Select target sector(s):").style(
             "color:#9ca3af; font-size:10px; margin-bottom:4px;"
         )
@@ -405,20 +424,26 @@ def show_torpedo_dialog() -> None:
         def torp_sector_grid() -> None:
             display = g.get_sector_display()
             sel_set = set(sel)
+
             with ui.element("div").style("display:flex; flex-direction:column; gap:2px;"):
                 for r in range(8):
                     with ui.element("div").style("display:flex; gap:2px;"):
                         for c in range(8):
                             entry = display.get((r, c))
                             is_ship = (r, c) == (g.s_pos.row, g.s_pos.col)
-                            is_sel = (r, c) in sel_set
+                            sym = entry[0] if entry else "·"
+                            etype = entry[1] if entry else "empty"
 
-                            if entry:
-                                sym, etype = entry
-                            else:
-                                sym, etype = "·", "empty"
-
-                            if is_sel:
+                            # Animation layers take priority over normal display
+                            if (r, c) in anim["impacts"]:
+                                sym, bg, border, fg = (
+                                    "*", "#7f1d1d", "2px solid #fbbf24", "#fef08a"
+                                )
+                            elif (r, c) in anim["torps"]:
+                                sym, bg, border, fg = (
+                                    "o", "#431407", "1px solid #f97316", "#fb923c"
+                                )
+                            elif (r, c) in sel_set:
                                 bg, border, fg = "#7f1d1d", "2px solid #ef4444", "#fca5a5"
                             elif etype == "ship":
                                 bg, border, fg = "#052e16", "1px solid #4ade80", "#4ade80"
@@ -432,7 +457,7 @@ def show_torpedo_dialog() -> None:
                                 bg, border, fg = "transparent", "1px solid #1f2937", "#374151"
 
                             def on_cell_click(r: int = r, c: int = c) -> None:
-                                if is_ship:
+                                if is_ship or anim["firing"]:
                                     return
                                 if (r, c) in sel:
                                     sel.remove((r, c))
@@ -455,8 +480,7 @@ def show_torpedo_dialog() -> None:
 
         def _update_sel_label() -> None:
             if sel:
-                t = "  ".join(f"({r+1},{c+1})" for r, c in sel)
-                sel_label.text = f"Targets: {t}"
+                sel_label.text = "Targets: " + "  ".join(f"({r+1},{c+1})" for r, c in sel)
             else:
                 sel_label.text = "Targets: none selected"
 
@@ -479,26 +503,53 @@ def show_torpedo_dialog() -> None:
             b.on("click", lambda n=i + 1: set_count(n))
         set_count(1)
 
-        # Fire / Cancel
         with ui.element("div").style("display:flex; gap:8px; margin-top:12px;"):
-            def fire() -> None:
-                if not sel:
-                    ui.notify("Select at least one target sector first.", color="warning")
-                    return
-                targets = list(sel)
-                dlg.close()
-                g.messages.append(f"> tor {' '.join(f'{r+1} {c+1}' for r, c in targets)}")
-                g.cmd_torpedo(targets)
-                _refresh_all()
-                if g.game_over:
-                    show_game_over_dialog(g)
-
-            ui.button("FIRE TORPEDOES", on_click=fire).style(
+            fire_btn = ui.button("FIRE TORPEDOES").style(
                 "background:#dc2626; color:white; font-family:monospace; font-weight:bold;"
             ).props("dense")
-            ui.button("CANCEL", on_click=dlg.close).style(
+            cancel_btn = ui.button("CANCEL").style(
                 "background:#374151; color:#9ca3af; font-family:monospace;"
             ).props("dense")
+
+        async def fire_animated() -> None:
+            if not sel:
+                ui.notify("Select at least one target sector first.", color="warning")
+                return
+
+            targets = list(sel)
+            anim["firing"] = True
+            fire_btn.disable()
+            cancel_btn.disable()
+
+            ship = (g.s_pos.row, g.s_pos.col)
+            paths = [_torp_path(ship, t) for t in targets]
+            max_steps = max(len(p) for p in paths)
+
+            # Animate torpedoes travelling
+            for step in range(max_steps):
+                anim["torps"] = {p[step] for p in paths if step < len(p)}
+                anim["impacts"] = set()
+                torp_sector_grid.refresh()
+                await asyncio.sleep(0.07)
+
+            # Impact flash
+            anim["torps"] = set()
+            anim["impacts"] = set(targets)
+            torp_sector_grid.refresh()
+            await asyncio.sleep(0.35)
+
+            # Clean up and execute
+            anim["torps"] = set()
+            anim["impacts"] = set()
+            dlg.close()
+            g.messages.append(f"> tor {' '.join(f'{r+1} {c+1}' for r, c in targets)}")
+            g.cmd_torpedo(targets)
+            _refresh_all()
+            if g.game_over:
+                show_game_over_dialog(g)
+
+        fire_btn.on("click", fire_animated)
+        cancel_btn.on("click", dlg.close)
 
     dlg.open()
 
