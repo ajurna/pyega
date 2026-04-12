@@ -454,7 +454,7 @@ class GameState:
             f"  Stellar shockwave destroys {killed_k} Klingon(s) and {killed_b} starbase(s).",
         ]
 
-        # Damage player if in the supernova quadrant
+        # If player is in the supernova quadrant, take blast damage and get thrown out
         if qr == self.q_pos.row and qc == self.q_pos.col:
             blast = random.randint(400, 900)
             absorbed = 0
@@ -466,11 +466,36 @@ class GameState:
             msgs.append(
                 f"  Shockwave hits Enterprise! Shields absorbed {absorbed}, hull -{hull}."
             )
-            # Guaranteed system damage from supernova
             for _ in range(random.randint(1, 3)):
                 sys_key = random.choice(list(self.damage.SYSTEMS.keys()))
                 self.damage.take_hit(sys_key, amount=3)
                 msgs.append(f"  >> {self.damage.SYSTEMS[sys_key]} heavily damaged!")
+
+            # Throw ship to a random neighbouring quadrant
+            neighbours = [
+                (qr + dr, qc + dc)
+                for dr in (-1, 0, 1) for dc in (-1, 0, 1)
+                if (dr, dc) != (0, 0)
+                and 0 <= qr + dr < GALAXY_SIZE
+                and 0 <= qc + dc < GALAXY_SIZE
+                and not self.galaxy.quadrants[qr + dr][qc + dc].supernova
+            ]
+            if neighbours:
+                new_qr, new_qc = random.choice(neighbours)
+                self.q_pos = Position(new_qr, new_qc)
+                self.current_quadrant.scanned = True
+                pos = self.current_quadrant.random_free_pos()
+                self.s_pos = pos if pos else Position(3, 3)
+                self.docked = False
+                msgs.append(
+                    f"  Enterprise thrown to quadrant ({new_qr+1},{new_qc+1}), "
+                    f"sector ({self.s_pos.row+1},{self.s_pos.col+1})!"
+                )
+                k = self.current_quadrant.klingon_count
+                if k:
+                    msgs.append(f"  WARNING: {k} Klingon vessel(s) in new quadrant!")
+            else:
+                msgs.append("  Nowhere to run — Enterprise trapped in supernova quadrant!")
 
         return msgs
 
