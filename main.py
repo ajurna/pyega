@@ -523,20 +523,19 @@ def show_torpedo_dialog() -> None:
 
             ship = (g.s_pos.row, g.s_pos.col)
             paths = [_torp_path(ship, t) for t in targets]
-            max_steps = max(len(p) for p in paths)
 
-            # Animate torpedoes travelling
-            for step in range(max_steps):
-                anim["torps"] = {p[step] for p in paths if step < len(p)}
-                anim["impacts"] = set()
+            # Animate each torpedo sequentially
+            for path, target in zip(paths, targets):
+                for pos in path:
+                    anim["torps"] = {pos}
+                    anim["impacts"] = set()
+                    torp_sector_grid.refresh()
+                    await asyncio.sleep(0.07)
+                # Impact flash for this torpedo
+                anim["torps"] = set()
+                anim["impacts"] = {target}
                 torp_sector_grid.refresh()
-                await asyncio.sleep(0.07)
-
-            # Impact flash
-            anim["torps"] = set()
-            anim["impacts"] = set(targets)
-            torp_sector_grid.refresh()
-            await asyncio.sleep(0.35)
+                await asyncio.sleep(0.3)
 
             # Clean up and execute
             anim["torps"] = set()
