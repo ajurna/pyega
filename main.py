@@ -199,10 +199,12 @@ def status_panel() -> None:
         stat("Energy", str(g.energy), etxt)
         bar(epct, ecol)
 
-        # Shields
-        spct = max(0.0, min(1.0, g.shields / G.MAX_SHIELDS))
-        stat("Shields", str(g.shields), "#93c5fd")
-        bar(spct, "#3b82f6")
+        # Shields — show UP/DOWN state and pool level
+        spct = max(0.0, min(1.0, g.shield_energy / G.MAX_SHIELDS))
+        shield_label = "Shields ▲" if g.shields_up else "Shields ▽"
+        shield_col = "#60a5fa" if g.shields_up else "#475569"
+        stat(shield_label, str(g.shield_energy), shield_col)
+        bar(spct, "#3b82f6" if g.shields_up else "#334155")
 
         divider()
         stat("Warp",      f"{g.warp_factor:.1f}", "#c084fc")
@@ -348,10 +350,13 @@ def show_help_dialog() -> None:
             ("w FACTOR",       "Set warp factor 0.1–8 (e.g. w5 or w2.5, default 5)"),
             ("pha POWER",      "Fire phasers with POWER energy units"),
             ("tor TR TC",      "Fire torpedo at sector row/col (1–8)"),
-            ("she LEVEL",      "Set shield energy level"),
+            ("shup / s",       "Raise shields (small energy cost)"),
+            ("shdn / sd",      "Lower shields (free; pool energy retained)"),
+            ("ene N",          "Transfer N energy to shields (neg = reclaim from shields)"),
+            ("max",            "Divert maximum energy to shields"),
             ("lrs",            "Long range scan (3×3 quadrant view)"),
             ("dam",            "Damage report"),
-            ("dock",           "Dock with adjacent starbase"),
+            ("dock",           "Dock with adjacent starbase (restores main energy only)"),
             ("status",         "Full status report"),
             ("help",           "This message"),
             ("quit",           "Surrender"),
@@ -360,7 +365,7 @@ def show_help_dialog() -> None:
             for cmd, desc in rows:
                 ui.label(cmd).classes("text-yellow-400 text-sm")
                 ui.label(desc).classes("text-gray-300 text-sm")
-        ui.label("Single-letter abbreviations work for most commands").classes(
+        ui.label("Single-letter abbreviations: s=shup  sd=shdn  e=ene  p=pha  t=tor").classes(
             "text-gray-500 text-xs mt-3"
         )
         ui.button("Close", on_click=dlg.close).classes("mt-3 bg-gray-700 text-gray-200")
@@ -512,7 +517,7 @@ def index() -> None:
             "color:#4ade80; font-family:monospace; font-weight:bold; font-size:16px;"
         )
         cmd_input = (
-            ui.input(placeholder="m 6 2 3 5  |  m 3 5  |  w 6  |  pha 500  |  tor 3 5  |  lrs")
+            ui.input(placeholder="m 6 2 3 5  |  m 3 5  |  w 6  |  pha 500  |  tor 3 5  |  shup  |  ene 500  |  lrs")
             .style("flex:1; font-family:monospace;")
             .classes("text-green-300")
             .props("dark dense standout outlined")

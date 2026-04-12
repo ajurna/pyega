@@ -250,7 +250,8 @@ class GameState:
         # Ship stats
         self.energy = INITIAL_ENERGY
         self.torpedoes = INITIAL_TORPEDOES
-        self.shields = 0
+        self.shield_energy: int = 0       # energy stored in the shield pool
+        self.shields_up: bool = False     # whether shields are currently raised
         self.warp_factor: float = DEFAULT_WARP
         self.damage = SystemDamage()
         self.docked = False
@@ -287,6 +288,16 @@ class GameState:
         return self.galaxy.quadrants[self.q_pos.row][self.q_pos.col]
 
     @property
+    def shields(self) -> int:
+        """Backwards-compat alias for shield_energy (used by UI)."""
+        return self.shield_energy
+
+    @property
+    def shield_efficiency(self) -> float:
+        """0.1–1.0 based on shield generator health. Each damage level costs 15%."""
+        return max(0.1, 1.0 - self.damage.shield_control * 0.15)
+
+    @property
     def condition(self) -> str:
         if self.docked:
             return "DOCKED"
@@ -319,14 +330,29 @@ class GameState:
             raw = random.randint(KLINGON_ATTACK_MIN, KLINGON_ATTACK_MAX)
             dmg = int(raw / dist)
 
-            shield_abs = min(self.shields, dmg // 2)
-            self.shields = max(0, self.shields - shield_abs)
-            hull = dmg - shield_abs
-            self.energy = max(0, self.energy - hull)
+            if self.shields_up and self.shield_energy > 0:
+                efficiency = self.shield_efficiency
+                # Effective protection is pool × efficiency multiplier
+                effective = self.shield_energy * efficiency
+                if effective >= dmg:
+                    # Shields fully absorb — consume proportional pool energy
+                    energy_used = int(dmg / efficiency)
+                    self.shield_energy = max(0, self.shield_energy - energy_used)
+                    shield_abs, hull = dmg, 0
+                else:
+                    # Partial absorption — drain entire pool, remainder hits hull
+                    shield_abs = int(effective)
+                    self.shield_energy = 0
+                    hull = dmg - shield_abs
+            else:
+                shield_abs, hull = 0, dmg
 
+            self.energy = max(0, self.energy - hull)
+            eff_note = (f" (shields {self.shield_efficiency * 100:.0f}% efficient)"
+                        if self.shields_up and self.damage.shield_control > 0 else "")
             self._msg(
                 f"  Klingon ({k.pos.row + 1},{k.pos.col + 1}) fires {dmg} units."
-                f" Shields -{shield_abs}, Hull -{hull}."
+                f" Shields absorbed {shield_abs}{eff_note}, Hull -{hull}."
             )
 
             if hull > 30 and random.random() < 0.35:
@@ -350,9 +376,9 @@ class GameState:
 
     def _dock(self) -> None:
         self.docked = True
-        self.energy = INITIAL_ENERGY
+        self.energy = INITIAL_ENERGY      # starbase refuels main energy only
         self.torpedoes = INITIAL_TORPEDOES
-        self.shields = 0
+        # shield_energy and shields_up are unchanged — player transfers manually
         for sys_key in list(self.damage.SYSTEMS.keys()):
             setattr(self.damage, sys_key, 0)
 
@@ -436,7 +462,7 @@ class GameState:
             if not (0 <= sr <= 7 and 0 <= sc <= 7):
                 return ["Invalid sector (coordinates must be 1–8)."]
 
-            available = self.energy - self.shields
+            available = self.energy
             if available < IMPULSE_ENERGY_COST:
                 return [f"Insufficient energy for impulse ({IMPULSE_ENERGY_COST} needed)."]
 
@@ -484,14 +510,14 @@ class GameState:
             return ["Already in that quadrant. Use 'm SR SC' to move within a sector."]
 
         wf = self.warp_factor
-        shield_multiplier = 2.0 if self.shields > 0 else 1.0
+        shield_multiplier = 2.0 if self.shields_up else 1.0
         energy_per_quad = wf * WARP_ENERGY_PER_QUADRANT * shield_multiplier
         time_per_quad = 1.0 / wf
 
         path = self._warp_path(qr, qc)
         total_dist = len(path)
         total_cost = int(total_dist * energy_per_quad)
-        available = self.energy - self.shields
+        available = self.energy
 
         if available < total_cost:
             shield_note = " (shields doubled cost)" if shield_multiplier > 1 else ""
@@ -581,7 +607,7 @@ class GameState:
         if power <= 0:
             return ["Invalid power level."]
 
-        available = self.energy - self.shields
+        available = self.energy
         if power > available:
             return [f"Insufficient energy. Available: {available}."]
 
@@ -661,19 +687,72 @@ class GameState:
         self._check_end()
         return msgs
 
-    def cmd_shields(self, level: int) -> list[str]:
+    SHIELD_RAISE_COST = 50  # one-time energy cost to energise shield generators
+
+    def cmd_shup(self) -> list[str]:
+        """Raise shields (SHUP). Small one-time energy cost."""
         if self.damage.is_damaged("shield_control"):
             return ["Shield control is damaged!"]
+        if self.shields_up:
+            return ["Shields are already raised."]
+        if self.energy < self.SHIELD_RAISE_COST:
+            return [f"Insufficient energy to raise shields (need {self.SHIELD_RAISE_COST})."]
+        self.shields_up = True
+        self.energy -= self.SHIELD_RAISE_COST
+        msg = (f"Shields raised. Energy -{self.SHIELD_RAISE_COST}. "
+               f"Shield energy: {self.shield_energy}. Use 'ene N' to transfer energy to shields.")
+        self._msg(msg)
+        return [msg]
 
-        level = max(0, level)
-        max_possible = min(MAX_SHIELDS, self.energy + self.shields)
-        level = min(level, max_possible)
+    def cmd_shdn(self) -> list[str]:
+        """Lower shields (SHDN). Free; shield energy pool is retained."""
+        if not self.shields_up:
+            return ["Shields are already down."]
+        self.shields_up = False
+        msg = f"Shields lowered. Shield energy pool retained: {self.shield_energy}."
+        self._msg(msg)
+        return [msg]
 
-        delta = level - self.shields
-        self.energy -= delta
-        self.shields = level
+    def cmd_energy_transfer(self, amount: int) -> list[str]:
+        """Transfer energy between main banks and shield pool.
+        Positive amount = main → shields.  Negative = shields → main.
+        """
+        if self.damage.is_damaged("shield_control"):
+            return ["Shield control is damaged — cannot transfer energy to shields."]
+        if amount == 0:
+            return ["Specify a non-zero transfer amount (e.g. 'ene 500' or 'ene -200')."]
 
-        msg = f"Shields set to {self.shields}. Energy: {self.energy}."
+        if amount > 0:
+            can = min(amount, self.energy, MAX_SHIELDS - self.shield_energy)
+            if can <= 0:
+                if self.shield_energy >= MAX_SHIELDS:
+                    return [f"Shield energy already at maximum ({MAX_SHIELDS})."]
+                return ["Insufficient main energy for transfer."]
+            self.energy -= can
+            self.shield_energy += can
+            msg = f"Transferred {can} to shields. Main: {self.energy}, Shields: {self.shield_energy}."
+        else:
+            can = min(-amount, self.shield_energy, INITIAL_ENERGY - self.energy)
+            if can <= 0:
+                return ["No shield energy to transfer back." if self.shield_energy == 0
+                        else "Main energy already full."]
+            self.shield_energy -= can
+            self.energy += can
+            msg = f"Transferred {can} from shields to main. Main: {self.energy}, Shields: {self.shield_energy}."
+
+        self._msg(msg)
+        return [msg]
+
+    def cmd_max_shields(self) -> list[str]:
+        """Divert maximum possible energy from main banks to shield pool."""
+        if self.damage.is_damaged("shield_control"):
+            return ["Shield control is damaged!"]
+        can = min(self.energy, MAX_SHIELDS - self.shield_energy)
+        if can <= 0:
+            return [f"Shield energy already at maximum ({MAX_SHIELDS})."]
+        self.energy -= can
+        self.shield_energy += can
+        msg = f"Maximum energy diverted to shields. Main: {self.energy}, Shields: {self.shield_energy}."
         self._msg(msg)
         return [msg]
 
@@ -722,12 +801,16 @@ class GameState:
         return ["No starbase in docking range. Move adjacent to a starbase (B)."]
 
     def cmd_status(self) -> list[str]:
+        shield_status = (f"UP  ({self.shield_energy}/{MAX_SHIELDS}, "
+                         f"{self.shield_efficiency * 100:.0f}% efficient)"
+                         if self.shields_up else
+                         f"DOWN ({self.shield_energy} stored)")
         msgs = [
             "Status Report:",
             f"  Stardate       : {self.stardate:.1f}",
             f"  Condition      : {self.condition}",
-            f"  Energy         : {self.energy}",
-            f"  Shields        : {self.shields}",
+            f"  Main energy    : {self.energy}",
+            f"  Shields        : {shield_status}",
             f"  Torpedoes      : {self.torpedoes}",
             f"  Klingons left  : {self.galaxy.total_klingons}",
             f"  Starbases left : {self.galaxy.total_starbases}",
@@ -744,16 +827,18 @@ class GameState:
             "  m QR QC SR SC  Warp to quadrant+sector (e.g. m 6 2 3 5 or m6235)",
             "  m SR SC        Impulse move within quadrant (e.g. m 3 5 or m35)",
             "  w FACTOR       Set warp factor 0.1–8 (e.g. w5 or w2.5)",
-            "  pha  POWER   Fire phasers with POWER energy units",
-            "  tor  TR TC   Fire torpedo at sector row/col (1–8)",
-            "  she  LEVEL   Set shield energy level (0 = drain)",
-            "  lrs          Long range scan (3×3 quadrant view)",
-            "  dam          Damage report",
-            "  dock         Dock with adjacent starbase",
-            "  status       Full status report",
-            "  help         This message",
-            "  quit         Surrender",
-            "Abbreviations: w p t m s l d",
+            "  pha  POWER     Fire phasers with POWER energy units",
+            "  tor  TR TC     Fire torpedo at sector row/col (1–8)",
+            "  shup / s       Raise shields (small energy cost)",
+            "  shdn / sd      Lower shields (free; pool energy retained)",
+            "  ene  N         Transfer N energy main→shields (neg = shields→main)",
+            "  max            Divert max energy to shields",
+            "  lrs            Long range scan (3×3 quadrant view)",
+            "  dam            Damage report",
+            "  dock           Dock with adjacent starbase",
+            "  status         Full status report",
+            "  help           This message",
+            "  quit           Surrender",
         ]
         for m in msgs:
             self._msg(m)
@@ -765,10 +850,12 @@ class GameState:
 # ---------------------------------------------------------------------------
 
 _ALIASES: dict[str, str] = {
-    "move": "m", "nav": "m", "warp": "m", "imp": "m", "impulse": "m",
+    "move": "m", "nav": "m", "imp": "m", "impulse": "m",
     "p": "pha", "phaser": "pha", "phasers": "pha",
     "t": "tor", "torp": "tor", "torpedo": "tor",
-    "s": "she", "shield": "she", "shields": "she",
+    "s": "shup", "shield": "shup", "shields": "shup",
+    "sd": "shdn",
+    "e": "ene", "energy": "ene",
     "l": "lrs", "scan": "lrs",
     "d": "dam", "damage": "dam",
     "h": "help", "?": "help",
@@ -846,11 +933,20 @@ def parse_and_execute(state: GameState, raw: str) -> list[str]:
             return ["Usage: tor <sector-row> <sector-col>  (e.g. tor 3 5)"]
         return state.cmd_torpedo(tr, tc)
 
-    if verb == "she":
-        level = get_int(0)
-        if level is None:
-            return ["Usage: she <level>  (e.g. she 500)"]
-        return state.cmd_shields(level)
+    if verb == "shup":
+        return state.cmd_shup()
+
+    if verb == "shdn":
+        return state.cmd_shdn()
+
+    if verb == "ene":
+        amount = get_int(0)
+        if amount is None:
+            return ["Usage: ene <amount>  (e.g. ene 500  or  ene -200 to reclaim)"]
+        return state.cmd_energy_transfer(amount)
+
+    if verb == "max":
+        return state.cmd_max_shields()
 
     if verb == "lrs":
         return state.cmd_lrs()
