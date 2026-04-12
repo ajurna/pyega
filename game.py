@@ -495,7 +495,8 @@ class GameState:
                 if k:
                     msgs.append(f"  WARNING: {k} Klingon vessel(s) in new quadrant!")
             else:
-                msgs.append("  Nowhere to run — Enterprise trapped in supernova quadrant!")
+                msgs.append("  No escape — Enterprise consumed by the supernova!")
+                self.energy = 0
 
         return msgs
 
