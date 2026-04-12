@@ -641,10 +641,29 @@ class GameState:
         self._check_end()
         return msgs
 
+    @property
+    def torpedo_tubes(self) -> int:
+        """Available torpedo tubes based on torpedo_tubes damage level.
+        3 tubes at full repair; 2 at damage 1-2; 1 at damage 3-5; 0 at 6+.
+        """
+        lvl = self.damage.torpedo_tubes
+        if lvl == 0:
+            return 3
+        if lvl <= 2:
+            return 2
+        if lvl <= 5:
+            return 1
+        return 0
+
     def cmd_torpedo(self, tr: int, tc: int) -> list[str]:
-        """Fire torpedo at sector (tr, tc) — 0-indexed."""
-        if self.damage.is_damaged("torpedo_tubes"):
-            return ["Torpedo tubes are damaged!"]
+        """Fire torpedo at sector (tr, tc) — 0-indexed.
+
+        Damage is distance-variable: guaranteed destroy at close range,
+        reduced effectiveness at distance. Shields raised degrades accuracy.
+        """
+        tubes = self.torpedo_tubes
+        if tubes == 0:
+            return ["Torpedo tubes are too heavily damaged to fire!"]
         if self.torpedoes <= 0:
             return ["No torpedoes remaining!"]
         if not (0 <= tr <= 7 and 0 <= tc <= 7):
@@ -653,7 +672,32 @@ class GameState:
         self.torpedoes -= 1
         self.stardate -= 0.1
 
-        msgs = [f"Torpedo fired at sector ({tr + 1},{tc + 1})..."]
+        target_pos = Position(tr, tc)
+        dist = max(0.5, self.s_pos.distance_to(target_pos))
+
+        # Base miss probability by distance; shields raised adds 20%
+        if dist < 1.5:
+            miss_chance = 0.0
+        elif dist < 3.5:
+            miss_chance = 0.15
+        else:
+            miss_chance = 0.30
+        if self.shields_up:
+            miss_chance = min(0.75, miss_chance + 0.20)
+
+        shield_note = " (shields degrading accuracy)" if self.shields_up else ""
+        msgs = [f"Torpedo fired at sector ({tr + 1},{tc + 1})...{shield_note}"]
+
+        # Miss check
+        if random.random() < miss_chance:
+            msgs.append("Torpedo missed! No impact detected.")
+            self._energy_regen(0.1)
+            for m in msgs:
+                self._msg(m)
+            self._klingon_attack()
+            self._check_end()
+            return msgs
+
         display = self.current_quadrant.get_display()
         target = display.get((tr, tc))
         hit = False
@@ -663,8 +707,25 @@ class GameState:
             if sym == "K":
                 for k in self.current_quadrant.klingons:
                     if k.pos.row == tr and k.pos.col == tc:
-                        self.current_quadrant.klingons.remove(k)
-                        msgs.append("DIRECT HIT! Klingon vessel destroyed!")
+                        # Close range → guaranteed destroy; longer range → variable
+                        if dist < 1.5:
+                            destroy = True
+                        elif dist < 3.5:
+                            destroy = random.random() < 0.80
+                        else:
+                            destroy = random.random() < 0.50
+
+                        if destroy:
+                            self.current_quadrant.klingons.remove(k)
+                            msgs.append("DIRECT HIT! Klingon vessel destroyed!")
+                        else:
+                            damage = int(KLINGON_HEALTH * random.uniform(0.4, 0.7))
+                            k.health -= damage
+                            if k.health <= 0:
+                                self.current_quadrant.klingons.remove(k)
+                                msgs.append(f"Hit! Klingon vessel destroyed ({damage} damage)!")
+                            else:
+                                msgs.append(f"Hit! Klingon vessel damaged ({damage} damage, {k.health} remaining).")
                         hit = True
                         break
             elif sym == "B":

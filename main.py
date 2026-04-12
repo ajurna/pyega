@@ -209,7 +209,8 @@ def status_panel() -> None:
         divider()
         stat("Warp",      f"{g.warp_factor:.1f}", "#c084fc")
         stat("Klingons",  str(g.galaxy.total_klingons), "#f87171")
-        stat("Torpedoes", str(g.torpedoes), "#fb923c")
+        tubes = g.torpedo_tubes
+        stat("Torpedoes", f"{g.torpedoes}  [{tubes}t]", "#fb923c")
 
         # Damage (compact)
         damaged = [(name, lvl) for _, name, lvl in g.damage.all_systems() if lvl > 0]
