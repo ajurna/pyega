@@ -278,6 +278,8 @@ def galaxy_map() -> None:
                             bg_c = "#052e16"
                         elif not scanned:
                             fg_c, border, bg_c = "#1f2937", "1px solid #111827", "transparent"
+                        elif code == "999":
+                            fg_c, border, bg_c = "#fef08a", "2px solid #eab308", "#422006"
                         else:
                             k = int(code[0]) if code != "???" else 0
                             b = code[1] if code != "???" else "0"
@@ -522,10 +524,12 @@ def show_torpedo_dialog() -> None:
             cancel_btn.disable()
 
             ship = (g.s_pos.row, g.s_pos.col)
-            paths = [_torp_path(ship, t) for t in targets]
+            # Resolve actual hit cells (stops at first star along path)
+            resolved = [g._resolve_torpedo_target(tr, tc) for tr, tc in targets]
+            paths = [_torp_path(ship, t) for t in resolved]
 
             # Animate each torpedo sequentially
-            for path, target in zip(paths, targets):
+            for path, hit_cell in zip(paths, resolved):
                 for pos in path:
                     anim["torps"] = {pos}
                     anim["impacts"] = set()
@@ -533,7 +537,7 @@ def show_torpedo_dialog() -> None:
                     await asyncio.sleep(0.07)
                 # Impact flash for this torpedo
                 anim["torps"] = set()
-                anim["impacts"] = {target}
+                anim["impacts"] = {hit_cell}
                 torp_sector_grid.refresh()
                 await asyncio.sleep(0.3)
 

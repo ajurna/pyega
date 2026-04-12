@@ -115,6 +115,7 @@ class Quadrant:
     starbases: list[Position] = field(default_factory=list)
     stars: list[Position] = field(default_factory=list)
     scanned: bool = False
+    supernova: bool = False
 
     @property
     def klingon_count(self) -> int:
@@ -129,6 +130,8 @@ class Quadrant:
         return len(self.stars)
 
     def lrs_code(self) -> str:
+        if self.supernova:
+            return "999"
         k = min(self.klingon_count, 9)
         b = min(self.starbase_count, 9)
         s = min(self.star_count, 9)
@@ -409,6 +412,68 @@ class GameState:
     # Commands
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _sector_path(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
+        """Straight-line sector path from start to end (exclusive of start)."""
+        r0, c0 = start
+        r1, c1 = end
+        dr, dc = r1 - r0, c1 - c0
+        steps = max(abs(dr), abs(dc))
+        if steps == 0:
+            return [(r1, c1)]
+        path, seen = [], set()
+        for i in range(1, steps + 1):
+            r = round(r0 + dr * i / steps)
+            c = round(c0 + dc * i / steps)
+            if (r, c) not in seen:
+                path.append((r, c))
+                seen.add((r, c))
+        return path
+
+    def _resolve_torpedo_target(self, tr: int, tc: int) -> tuple[int, int]:
+        """Walk the path from ship to (tr,tc); return first star hit, else (tr,tc)."""
+        display = self.current_quadrant.get_display()
+        for r, c in self._sector_path((self.s_pos.row, self.s_pos.col), (tr, tc)):
+            cell = display.get((r, c))
+            if cell and cell[1] == "star":
+                return (r, c)
+        return (tr, tc)
+
+    def _trigger_supernova(self, qr: int, qc: int) -> list[str]:
+        """A star in quadrant (qr,qc) goes supernova."""
+        q = self.galaxy.quadrants[qr][qc]
+        q.supernova = True
+        q.scanned = True
+        killed_k = len(q.klingons)
+        killed_b = len(q.starbases)
+        q.klingons.clear()
+        q.starbases.clear()
+
+        msgs = [
+            f"*** SUPERNOVA in quadrant ({qr+1},{qc+1})! ***",
+            f"  Stellar shockwave destroys {killed_k} Klingon(s) and {killed_b} starbase(s).",
+        ]
+
+        # Damage player if in the supernova quadrant
+        if qr == self.q_pos.row and qc == self.q_pos.col:
+            blast = random.randint(400, 900)
+            absorbed = 0
+            if self.shields_up and self.shield_energy > 0:
+                absorbed = min(self.shield_energy, blast)
+                self.shield_energy -= absorbed
+            hull = blast - absorbed
+            self.energy = max(0, self.energy - hull)
+            msgs.append(
+                f"  Shockwave hits Enterprise! Shields absorbed {absorbed}, hull -{hull}."
+            )
+            # Guaranteed system damage from supernova
+            for _ in range(random.randint(1, 3)):
+                sys_key = random.choice(list(self.damage.SYSTEMS.keys()))
+                self.damage.take_hit(sys_key, amount=3)
+                msgs.append(f"  >> {self.damage.SYSTEMS[sys_key]} heavily damaged!")
+
+        return msgs
+
     def _warp_path(self, dest_qr: int, dest_qc: int) -> list[tuple[int, int]]:
         """Return quadrant coords along the straight-line path to destination, excluding origin."""
         start_r, start_c = self.q_pos.row, self.q_pos.col
@@ -673,10 +738,14 @@ class GameState:
         shield_note = " (shields degrading accuracy)" if self.shields_up else ""
         msgs: list[str] = []
 
-        for tr, tc in targets:
-            if not (0 <= tr <= 7 and 0 <= tc <= 7):
-                msgs.append(f"Invalid target sector ({tr+1},{tc+1}) — skipped.")
+        for orig_tr, orig_tc in targets:
+            if not (0 <= orig_tr <= 7 and 0 <= orig_tc <= 7):
+                msgs.append(f"Invalid target sector ({orig_tr+1},{orig_tc+1}) — skipped.")
                 continue
+
+            # Resolve actual hit cell — torpedo stops at first star along path
+            tr, tc = self._resolve_torpedo_target(orig_tr, orig_tc)
+            blocked_by_star = (tr, tc) != (orig_tr, orig_tc)
 
             self.torpedoes -= 1
             self.stardate -= 0.1
@@ -693,7 +762,11 @@ class GameState:
             if self.shields_up:
                 miss_chance = min(0.75, miss_chance + 0.20)
 
-            msgs.append(f"Torpedo -> sector ({tr+1},{tc+1}){shield_note}...")
+            dest_str = f"({tr+1},{tc+1})"
+            if blocked_by_star:
+                msgs.append(f"Torpedo -> sector {dest_str}{shield_note}... (intercepted by star)")
+            else:
+                msgs.append(f"Torpedo -> sector {dest_str}{shield_note}...")
 
             if random.random() < miss_chance:
                 msgs.append("  Missed!")
@@ -736,8 +809,11 @@ class GameState:
                     msgs.append("  WARNING: Friendly starbase destroyed! Starfleet is displeased.")
                     hit = True
                 elif sym == "*":
-                    msgs.append("  Torpedo absorbed by star.")
                     hit = True
+                    if random.random() < 0.25:
+                        msgs += self._trigger_supernova(self.q_pos.row, self.q_pos.col)
+                    else:
+                        msgs.append("  Torpedo absorbed by star.")
 
             if not hit:
                 msgs.append("  No impact detected.")
