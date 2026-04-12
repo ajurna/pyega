@@ -655,91 +655,92 @@ class GameState:
             return 1
         return 0
 
-    def cmd_torpedo(self, tr: int, tc: int) -> list[str]:
-        """Fire torpedo at sector (tr, tc) — 0-indexed.
+    def cmd_torpedo(self, targets: list[tuple[int, int]]) -> list[str]:
+        """Fire torpedoes at one or more sectors (0-indexed coords).
 
-        Damage is distance-variable: guaranteed destroy at close range,
-        reduced effectiveness at distance. Shields raised degrades accuracy.
+        Up to torpedo_tubes targets per call. Damage is distance-variable;
+        shields raised degrades accuracy.
         """
         tubes = self.torpedo_tubes
         if tubes == 0:
             return ["Torpedo tubes are too heavily damaged to fire!"]
         if self.torpedoes <= 0:
             return ["No torpedoes remaining!"]
-        if not (0 <= tr <= 7 and 0 <= tc <= 7):
-            return ["Invalid torpedo target."]
 
-        self.torpedoes -= 1
-        self.stardate -= 0.1
-
-        target_pos = Position(tr, tc)
-        dist = max(0.5, self.s_pos.distance_to(target_pos))
-
-        # Base miss probability by distance; shields raised adds 20%
-        if dist < 1.5:
-            miss_chance = 0.0
-        elif dist < 3.5:
-            miss_chance = 0.15
-        else:
-            miss_chance = 0.30
-        if self.shields_up:
-            miss_chance = min(0.75, miss_chance + 0.20)
+        # Clamp to available tubes and available torpedoes
+        targets = targets[:min(tubes, self.torpedoes)]
 
         shield_note = " (shields degrading accuracy)" if self.shields_up else ""
-        msgs = [f"Torpedo fired at sector ({tr + 1},{tc + 1})...{shield_note}"]
+        msgs: list[str] = []
 
-        # Miss check
-        if random.random() < miss_chance:
-            msgs.append("Torpedo missed! No impact detected.")
-            self._energy_regen(0.1)
-            for m in msgs:
-                self._msg(m)
-            self._klingon_attack()
-            self._check_end()
-            return msgs
+        for tr, tc in targets:
+            if not (0 <= tr <= 7 and 0 <= tc <= 7):
+                msgs.append(f"Invalid target sector ({tr+1},{tc+1}) — skipped.")
+                continue
 
-        display = self.current_quadrant.get_display()
-        target = display.get((tr, tc))
-        hit = False
+            self.torpedoes -= 1
+            self.stardate -= 0.1
 
-        if target:
-            sym, _ = target
-            if sym == "K":
-                for k in self.current_quadrant.klingons:
-                    if k.pos.row == tr and k.pos.col == tc:
-                        # Close range → guaranteed destroy; longer range → variable
-                        if dist < 1.5:
-                            destroy = True
-                        elif dist < 3.5:
-                            destroy = random.random() < 0.80
-                        else:
-                            destroy = random.random() < 0.50
+            target_pos = Position(tr, tc)
+            dist = max(0.5, self.s_pos.distance_to(target_pos))
 
-                        if destroy:
-                            self.current_quadrant.klingons.remove(k)
-                            msgs.append("DIRECT HIT! Klingon vessel destroyed!")
-                        else:
-                            damage = int(KLINGON_HEALTH * random.uniform(0.4, 0.7))
-                            k.health -= damage
-                            if k.health <= 0:
-                                self.current_quadrant.klingons.remove(k)
-                                msgs.append(f"Hit! Klingon vessel destroyed ({damage} damage)!")
+            if dist < 1.5:
+                miss_chance = 0.0
+            elif dist < 3.5:
+                miss_chance = 0.15
+            else:
+                miss_chance = 0.30
+            if self.shields_up:
+                miss_chance = min(0.75, miss_chance + 0.20)
+
+            msgs.append(f"Torpedo -> sector ({tr+1},{tc+1}){shield_note}...")
+
+            if random.random() < miss_chance:
+                msgs.append("  Missed!")
+                continue
+
+            display = self.current_quadrant.get_display()
+            target = display.get((tr, tc))
+            hit = False
+
+            if target:
+                sym, _ = target
+                if sym == "K":
+                    for k in self.current_quadrant.klingons:
+                        if k.pos.row == tr and k.pos.col == tc:
+                            if dist < 1.5:
+                                destroy = True
+                            elif dist < 3.5:
+                                destroy = random.random() < 0.80
                             else:
-                                msgs.append(f"Hit! Klingon vessel damaged ({damage} damage, {k.health} remaining).")
-                        hit = True
-                        break
-            elif sym == "B":
-                self.current_quadrant.starbases = [
-                    b for b in self.current_quadrant.starbases if not (b.row == tr and b.col == tc)
-                ]
-                msgs.append("WARNING: Friendly starbase destroyed! Starfleet is displeased.")
-                hit = True
-            elif sym == "*":
-                msgs.append("Torpedo absorbed by star.")
-                hit = True
+                                destroy = random.random() < 0.50
 
-        if not hit:
-            msgs.append("Torpedo missed! No impact detected.")
+                            if destroy:
+                                self.current_quadrant.klingons.remove(k)
+                                msgs.append("  DIRECT HIT! Klingon vessel destroyed!")
+                            else:
+                                damage = int(KLINGON_HEALTH * random.uniform(0.4, 0.7))
+                                k.health -= damage
+                                if k.health <= 0:
+                                    self.current_quadrant.klingons.remove(k)
+                                    msgs.append(f"  Hit! Klingon destroyed ({damage} damage)!")
+                                else:
+                                    msgs.append(f"  Hit! Klingon damaged ({damage} damage, {k.health} remaining).")
+                            hit = True
+                            break
+                elif sym == "B":
+                    self.current_quadrant.starbases = [
+                        b for b in self.current_quadrant.starbases
+                        if not (b.row == tr and b.col == tc)
+                    ]
+                    msgs.append("  WARNING: Friendly starbase destroyed! Starfleet is displeased.")
+                    hit = True
+                elif sym == "*":
+                    msgs.append("  Torpedo absorbed by star.")
+                    hit = True
+
+            if not hit:
+                msgs.append("  No impact detected.")
 
         self._energy_regen(0.1)
         for m in msgs:
@@ -889,7 +890,7 @@ class GameState:
             "  m SR SC        Impulse move within quadrant (e.g. m 3 5 or m35)",
             "  w FACTOR       Set warp factor 0.1–8 (e.g. w5 or w2.5)",
             "  pha  POWER     Fire phasers with POWER energy units",
-            "  tor  TR TC     Fire torpedo at sector row/col (1–8)",
+            "  tor  TR TC ...  Fire up to 3 torpedoes (e.g. tor 3 5  or  tor 3 5 4 6 2 7)",
             "  shup / s       Raise shields (small energy cost)",
             "  shdn / sd      Lower shields (free; pool energy retained)",
             "  ene  N         Transfer N energy main→shields (neg = shields→main)",
@@ -989,10 +990,15 @@ def parse_and_execute(state: GameState, raw: str) -> list[str]:
         return state.cmd_phasers(power)
 
     if verb == "tor":
-        tr, tc = get_coord(0), get_coord(1)
-        if tr is None or tc is None:
-            return ["Usage: tor <sector-row> <sector-col>  (e.g. tor 3 5)"]
-        return state.cmd_torpedo(tr, tc)
+        if len(args) < 2 or len(args) % 2 != 0:
+            return ["Usage: tor TR TC [TR TC ...]  (e.g. tor 3 5  or  tor 3 5 4 6 2 7)"]
+        targets = []
+        for i in range(0, len(args), 2):
+            tr, tc = get_coord(i), get_coord(i + 1)
+            if tr is None or tc is None:
+                return [f"Invalid coordinates at position {i+1}."]
+            targets.append((tr, tc))
+        return state.cmd_torpedo(targets)
 
     if verb == "shup":
         return state.cmd_shup()

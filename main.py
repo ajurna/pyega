@@ -350,7 +350,7 @@ def show_help_dialog() -> None:
             ("m SR SC",        "Impulse within quadrant (e.g. m 3 5 or m35)"),
             ("w FACTOR",       "Set warp factor 0.1–8 (e.g. w5 or w2.5, default 5)"),
             ("pha POWER",      "Fire phasers with POWER energy units"),
-            ("tor TR TC",      "Fire torpedo at sector row/col (1–8)"),
+            ("tor TR TC ...",   "Fire up to 3 torpedoes (e.g. tor 3 5  or  tor 3 5 4 6)"),
             ("shup / s",       "Raise shields (small energy cost)"),
             ("shdn / sd",      "Lower shields (free; pool energy retained)"),
             ("ene N",          "Transfer N energy to shields (neg = reclaim from shields)"),
